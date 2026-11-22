@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="18" fill="#173F35"/>
+  <!-- Crossed Knife & Fork in Amber Gold #F59E0B -->
+  <g stroke="#F59E0B" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Knife: diagonal blade and handle -->
+    <path d="M21 43 L32 32"/>
+    <path d="M32 32 C36 28 44 20 47 17 C49 19 49 24 43 30 L37 36"/>
+    <!-- Fork: diagonal handle and 3 tines -->
+    <path d="M43 43 L32 32"/>
+    <path d="M32 32 L25 25"/>
+    <path d="M20 28 L27 21"/>
+    <path d="M17 25 L24 18"/>
+  </g>
+</svg>
