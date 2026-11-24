@@ -46,7 +46,7 @@ export const CustomerHeader: React.FC = () => {
       <header className="sticky top-0 z-40 bg-[#FAF8F3]/95 backdrop-blur-md border-b border-[#E5E0D8] px-3 sm:px-4 py-2.5 sm:py-3">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 min-w-0">
           {/* Brand Wordmark */}
-          <Link to={`/menu?table=${activeTableNumber}`} className="group min-w-0 shrink">
+          <Link to={`/t/${activeTableNumber}`} className="group min-w-0 shrink">
             <BrandLogo size="sm" compact className="truncate" />
           </Link>
 
@@ -54,10 +54,6 @@ export const CustomerHeader: React.FC = () => {
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Live Clock Badge */}
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#173F35] text-white text-xs font-mono shadow-sm border border-[#235B4E]">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-              </span>
               <Clock className="w-3.5 h-3.5 text-emerald-300" />
               <span className="font-bold tabular-nums tracking-wide text-xs">{timeString}</span>
             </div>
@@ -67,7 +63,6 @@ export const CustomerHeader: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#173F35] text-white text-xs font-semibold shadow-sm shrink-0"
               title={`Stol №${activeTableNumber}`}
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-bold tabular-nums">Stol №{activeTableNumber}</span>
             </div>
 
@@ -76,7 +71,7 @@ export const CustomerHeader: React.FC = () => {
               type="button"
               onClick={handleCallWaiter}
               disabled={isCalling}
-              className={`relative px-2.5 py-1.5 rounded-full transition-all flex items-center gap-1.5 shrink-0 font-bold text-xs shadow-sm active:scale-95 ${
+              className={`relative min-h-[44px] min-w-[44px] px-3 py-2 rounded-full transition-all flex items-center justify-center gap-1.5 shrink-0 font-bold text-xs shadow-sm active:scale-95 ${
                 isEscalated
                   ? 'bg-red-600 text-white hover:bg-red-700 ring-2 ring-red-400/50'
                   : activeCall
@@ -111,7 +106,7 @@ export const CustomerHeader: React.FC = () => {
                 <Bell className="w-4 h-4" />
               )}
 
-              <span className="hidden sm:inline">
+              <span className="hidden sm:inline whitespace-nowrap">
                 {isCalling
                   ? 'Yuborilmoqda...'
                   : activeCall
@@ -126,13 +121,13 @@ export const CustomerHeader: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/cart')}
-              className="relative p-2 rounded-full bg-white border border-[#E5E0D8] text-[#173F35] hover:bg-[#FAF8F3] active:scale-95 transition-all shadow-sm shrink-0"
+              className="relative min-h-[44px] min-w-[44px] p-2 rounded-full bg-white border border-[#E5E0D8] text-[#173F35] hover:bg-[#FAF8F3] active:scale-95 transition-all shadow-sm shrink-0 flex items-center justify-center"
               title="Savatni ko'rish"
               aria-label="Savat"
             >
               <ShoppingBag className="w-4 h-4 text-[#173F35]" />
               {cartItemCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow tabular-nums">
+                <span className="absolute -top-0.5 -right-0.5 bg-amber-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow tabular-nums">
                   {cartItemCount}
                 </span>
               )}

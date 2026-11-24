@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AdminSidebar } from '../../components/AdminSidebar';
 import { AdminHeader } from '../../components/AdminHeader';
-import { formatUZS, formatShortTime, ORDER_STATUS_MAP } from '../../utils/formatters';
+import { formatUZS, formatShortTime, formatTimeAgo, ORDER_STATUS_MAP } from '../../utils/formatters';
 import { useLiveClock } from '../../hooks/useLiveClock';
 import {
   CreditCard,
@@ -27,6 +27,7 @@ import {
   Pause,
   BarChart2,
   Users,
+  Star,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -61,6 +62,8 @@ export const AdminDashboard: React.FC = () => {
     tables,
     serviceCalls,
     waiters,
+    dishReviews,
+    restaurantRating,
     resolveServiceCall,
     currentUser,
     restaurantName,
@@ -186,6 +189,14 @@ export const AdminDashboard: React.FC = () => {
                 <span>·</span>
                 <span className="text-[#173F35] font-medium">
                   {tables.length} ta stol / Barcha zallar faol
+                </span>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1 font-bold text-[#173F35] tabular-nums">
+                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                  <span>{restaurantRating.averageRating.toFixed(1)}</span>
+                  <span className="font-normal text-[#737A75]">
+                    ({restaurantRating.totalReviews} ta baho)
+                  </span>
                 </span>
               </div>
             </div>
@@ -1119,6 +1130,104 @@ export const AdminDashboard: React.FC = () => {
                 >
                   Barcha buyurtmalar oqimiga o'tish →
                 </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Restaurant Rating & Guest Dish Reviews Section */}
+          <div className="bg-white p-6 rounded-3xl border border-[#E5E0D8] shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#FAF8F3]">
+              <div>
+                <h3 className="font-display font-bold text-lg text-[#173F35]">
+                  Restoran reytingi va mijozlar sharhlari
+                </h3>
+                <p className="text-xs text-[#737A75] mt-0.5">
+                  Mijozlar tomonidan qoldirilgan taom baholari va izohlar restoran umumiy reytingini jonli shakllantiradi
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+                  <span className="font-display font-extrabold text-2xl text-[#173F35] tabular-nums">
+                    {restaurantRating.averageRating.toFixed(1)}
+                  </span>
+                  <span className="text-xs text-[#737A75]">/ 5.0</span>
+                </div>
+                <span className="text-xs text-[#737A75] tabular-nums">
+                  {restaurantRating.totalReviews} ta baho
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Distribution Breakdown */}
+              <div className="lg:col-span-4 bg-[#FAF8F3] rounded-2xl border border-[#E5E0D8] p-4 space-y-2.5">
+                <span className="text-xs font-bold text-[#173F35] block">
+                  Yulduzlar taqsimoti
+                </span>
+                {([5, 4, 3, 2, 1] as const).map((star) => {
+                  const count = restaurantRating.distribution[star] || 0;
+                  const pct =
+                    restaurantRating.totalReviews > 0
+                      ? Math.round((count / restaurantRating.totalReviews) * 100)
+                      : 0;
+                  return (
+                    <div key={star} className="flex items-center gap-2 text-xs">
+                      <span className="w-8 font-semibold text-[#202622] tabular-nums flex items-center gap-0.5 shrink-0">
+                        {star}
+                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                      </span>
+                      <div className="flex-1 h-2 bg-[#E5E0D8] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#173F35] rounded-full transition-all duration-300"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-10 text-right text-[11px] text-[#737A75] tabular-nums shrink-0">
+                        {count} ({pct}%)
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Latest Dish Reviews */}
+              <div className="lg:col-span-8 divide-y divide-[#FAF8F3]">
+                {dishReviews.slice(0, 6).map((rev) => (
+                  <div key={rev.id} className="py-3 first:pt-0 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                        <span className="font-bold text-[#202622]">{rev.dish_name}</span>
+                        <span className="text-[#A5A096]" aria-hidden="true">·</span>
+                        <span className="text-[#57605B]">
+                          {rev.customer_name || `Stol №${rev.table_number} mehmoni`}
+                        </span>
+                        <span className="text-[#A5A096]" aria-hidden="true">·</span>
+                        <span className="text-[11px] text-[#737A75]">
+                          Stol №{rev.table_number} · {formatTimeAgo(rev.created_at)}
+                        </span>
+                      </div>
+                      {rev.comment && (
+                        <p className="text-xs text-[#3C4440] mt-1 leading-relaxed">{rev.comment}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0 pt-0.5">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star
+                          key={s}
+                          className={`w-3.5 h-3.5 ${
+                            s <= rev.rating ? 'fill-amber-400 text-amber-400' : 'text-[#D6D1C7]'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {dishReviews.length === 0 && (
+                  <p className="text-xs text-[#737A75] py-6 text-center">
+                    Hozircha mijozlardan taom baholari kelib tushmagan.
+                  </p>
+                )}
               </div>
             </div>
           </div>

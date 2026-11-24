@@ -474,8 +474,8 @@ export const KitchenDisplayPage: React.FC = () => {
                                 {it.item_name}
                               </span>
                               {it.item_note && (
-                                <p className="text-xs text-amber-300 italic mt-0.5 font-medium">
-                                  "{it.item_note}"
+                                <p className="text-xs text-amber-300 mt-0.5 font-semibold">
+                                  Talabnoma: <span className="italic font-normal">"{it.item_note}"</span>
                                 </p>
                               )}
                             </div>
@@ -672,8 +672,8 @@ export const KitchenDisplayPage: React.FC = () => {
                                 )}
                               </div>
                               {it.item_note && (
-                                <p className="text-xs text-amber-300 italic mt-0.5 font-medium">
-                                  "{it.item_note}"
+                                <p className="text-xs text-amber-300 mt-0.5 font-semibold">
+                                  Talabnoma: <span className="italic font-normal">"{it.item_note}"</span>
                                 </p>
                               )}
                             </div>
@@ -783,10 +783,17 @@ export const KitchenDisplayPage: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="py-3 space-y-1">
+                    <div className="py-3 space-y-1.5">
                       {order.items.map((it) => (
                         <div key={it.id} className="text-xs text-gray-300">
-                          <strong className="text-white">{it.quantity}x</strong> {it.item_name}
+                          <div>
+                            <strong className="text-white">{it.quantity}x</strong> {it.item_name}
+                          </div>
+                          {it.item_note && (
+                            <p className="text-[11px] text-amber-300 italic pl-4">
+                              Talabnoma: "{it.item_note}"
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>

@@ -29,15 +29,14 @@ const DemoRoleBar: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
-  // NEVER show staff role switcher on Customer screens (/menu, /cart, /orders, /t/*)
+  // NEVER show staff role switcher on Customer screens (/t/*, /table/*, /menu, /cart, /orders) or Login (/, /login)
   // When a customer scans a table QR code, ONLY the customer screen must be visible.
-  const isCustomerScreen =
-    location.pathname.startsWith('/menu') ||
-    location.pathname.startsWith('/cart') ||
-    location.pathname.startsWith('/orders') ||
-    location.pathname.startsWith('/t/');
+  const isStaffWorkspace =
+    location.pathname.startsWith('/admin') ||
+    location.pathname.startsWith('/waiter') ||
+    location.pathname.startsWith('/kitchen');
 
-  if (isCustomerScreen) {
+  if (!isStaffWorkspace) {
     return null;
   }
 
@@ -60,7 +59,7 @@ const DemoRoleBar: React.FC = () => {
           </span>
 
           <Link
-            to={`/menu?table=${activeTableNumber}`}
+            to={`/t/${activeTableNumber}`}
             onClick={() => setUserRole('customer')}
             target="_blank"
             rel="noopener noreferrer"
@@ -127,17 +126,20 @@ export default function App() {
     <BrowserRouter>
       <AppProvider>
         <Routes>
-          {/* Default Route */}
-          <Route path="/" element={<Navigate to="/menu?table=1" replace />} />
-          <Route path="/waiter" element={<WaiterDashboard />} />
+          {/* Root / opens Staff & Admin Entry Portal; QR codes go straight to /t/:tableNum */}
+          <Route path="/" element={<LoginPage />} />
+          <Route path="/login" element={<LoginPage />} />
 
-          {/* Customer Routes (Pure Customer Screen Only) */}
+          {/* Pure Customer QR Routes (Instant locked menu, zero staff UI) */}
           <Route path="/t/:tableNum" element={<MenuPage />} />
+          <Route path="/t/:tableNum/*" element={<MenuPage />} />
+          <Route path="/table/:tableNum" element={<MenuPage />} />
           <Route path="/menu" element={<MenuPage />} />
           <Route path="/cart" element={<CartPage />} />
           <Route path="/orders" element={<OrderTrackPage />} />
 
-          {/* Kitchen Display System */}
+          {/* Waiter & Kitchen Terminals */}
+          <Route path="/waiter" element={<WaiterDashboard />} />
           <Route path="/kitchen" element={<KitchenDisplayPage />} />
 
           {/* Admin Suite */}
@@ -154,14 +156,11 @@ export default function App() {
           <Route path="/admin/settings" element={<SettingsPage />} />
           <Route path="/admin/panel-settings" element={<SettingsPage />} />
 
-          {/* Authentication */}
-          <Route path="/login" element={<LoginPage />} />
-
-          {/* Catch-all redirect */}
-          <Route path="*" element={<Navigate to="/menu?table=1" replace />} />
+          {/* Catch-all redirect to Staff/Admin entry */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
-        {/* Staff-only Role Switcher (Hidden on Customer screens) */}
+        {/* Staff-only Role Switcher (Strictly hidden on Customer QR & Login screens) */}
         <DemoRoleBar />
       </AppProvider>
     </BrowserRouter>

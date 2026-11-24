@@ -147,22 +147,22 @@ export const LoginPage: React.FC = () => {
                 KDS Oshxona
               </button>
               <button
-                onClick={() => handleQuickRole('customer')}
+                onClick={() => navigate('/t/1')}
                 className="px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-200 text-xs font-semibold"
               >
-                Mijoz (Stol 12)
+                Mijoz QR (Stol №1)
               </button>
             </div>
           </div>
         </div>
 
-        {/* Back to customer menu link */}
+        {/* Direct QR Menu test link */}
         <div className="text-center mt-6">
           <Link
-            to="/menu"
+            to="/t/1"
             className="text-xs font-semibold text-[#173F35] hover:underline"
           >
-            ← Mijoz menyusiga qaytish (QR Menyu)
+            Stol №1 QR menyusini ko'rish →
           </Link>
         </div>
       </div>

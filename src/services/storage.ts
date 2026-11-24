@@ -10,9 +10,11 @@ import {
   Waiter,
   WaiterShiftStatus,
   CustomerFeedback,
+  DishReview,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
+  INITIAL_DISH_REVIEWS,
   INITIAL_MENU_ITEMS,
   INITIAL_TABLES,
   INITIAL_ORDERS,
@@ -30,6 +32,7 @@ const STORAGE_KEYS = {
   SERVICE_CALLS: 'dineflow_service_calls_v1',
   WAITERS: 'dineflow_waiters_v1',
   FEEDBACKS: 'dineflow_customer_feedbacks_v1',
+  DISH_REVIEWS: 'dineflow_dish_reviews_v1',
 };
 
 // Cross-tab real-time event channel
@@ -43,8 +46,8 @@ try {
 }
 
 export interface RealtimeEventData {
-  type: 'orders' | 'tables' | 'menu' | 'service' | 'waiters';
-  action?: 'order_status_changed' | 'order_created' | 'service_call_created' | 'service_call_resolved' | 'table_settled_and_freed';
+  type: 'orders' | 'tables' | 'menu' | 'service' | 'waiters' | 'reviews';
+  action?: 'order_status_changed' | 'order_created' | 'service_call_created' | 'service_call_resolved' | 'table_settled_and_freed' | 'dish_review_added';
   orderId?: string;
   orderNumber?: string;
   tableNumber?: number;
@@ -60,7 +63,7 @@ export interface RealtimeEventData {
   itemsCount?: number;
 }
 
-export const emitRealtimeEvent = (type: 'orders' | 'tables' | 'menu' | 'service' | 'waiters', data?: Partial<RealtimeEventData>) => {
+export const emitRealtimeEvent = (type: 'orders' | 'tables' | 'menu' | 'service' | 'waiters' | 'reviews', data?: Partial<RealtimeEventData>) => {
   const detail: RealtimeEventData = { type, ...data };
   window.dispatchEvent(new CustomEvent('dineflow:sync', { detail }));
   if (broadcastChannel) {
@@ -157,6 +160,10 @@ class DataService {
 
     if (!localStorage.getItem(STORAGE_KEYS.WAITERS)) {
       localStorage.setItem(STORAGE_KEYS.WAITERS, JSON.stringify(INITIAL_WAITERS));
+    }
+
+    if (!localStorage.getItem(STORAGE_KEYS.DISH_REVIEWS)) {
+      localStorage.setItem(STORAGE_KEYS.DISH_REVIEWS, JSON.stringify(INITIAL_DISH_REVIEWS));
     }
   }
 
@@ -791,12 +798,30 @@ class DataService {
   // --- FEEDBACKS (BAHOLAR VA IZOHLAR) ---
   public async getFeedbacks(): Promise<CustomerFeedback[]> {
     if (typeof window === 'undefined') return [];
+    let localData: CustomerFeedback[] = [];
     try {
       const data = localStorage.getItem(STORAGE_KEYS.FEEDBACKS);
-      return data ? JSON.parse(data) : [];
+      localData = data ? JSON.parse(data) : [];
     } catch {
-      return [];
+      localData = [];
     }
+
+    fetch('/api/feedbacks')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((remote: CustomerFeedback[] | null) => {
+        if (Array.isArray(remote) && remote.length > 0) {
+          const map = new Map<string, CustomerFeedback>();
+          localData.forEach((f) => map.set(f.id, f));
+          remote.forEach((f) => map.set(f.id, f));
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          localStorage.setItem(STORAGE_KEYS.FEEDBACKS, JSON.stringify(merged));
+        }
+      })
+      .catch(() => {});
+
+    return localData;
   }
 
   public async saveFeedback(feedback: CustomerFeedback): Promise<void> {
@@ -843,7 +868,63 @@ class DataService {
       }
     }
 
+    fetch('/api/feedbacks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(feedback),
+    }).catch(() => {});
+
     emitRealtimeEvent('orders');
+    emitRealtimeEvent('reviews');
+  }
+
+  // --- DISH REVIEWS (TAOM BAHOLARI VA IZOHLARI) ---
+  public async getDishReviews(): Promise<DishReview[]> {
+    if (typeof window === 'undefined') return INITIAL_DISH_REVIEWS;
+    let localReviews: DishReview[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.DISH_REVIEWS);
+      localReviews = raw ? JSON.parse(raw) : INITIAL_DISH_REVIEWS;
+    } catch {
+      localReviews = INITIAL_DISH_REVIEWS;
+    }
+
+    fetch('/api/dish-reviews')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((remote: DishReview[] | null) => {
+        if (Array.isArray(remote) && remote.length > 0) {
+          const map = new Map<string, DishReview>();
+          localReviews.forEach((r) => map.set(r.id, r));
+          remote.forEach((r) => map.set(r.id, r));
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          localStorage.setItem(STORAGE_KEYS.DISH_REVIEWS, JSON.stringify(merged));
+        }
+      })
+      .catch(() => {});
+
+    return localReviews;
+  }
+
+  public async saveDishReview(review: DishReview): Promise<DishReview> {
+    const current = await this.getDishReviews();
+    const updated = [review, ...current.filter((r) => r.id !== review.id)];
+    localStorage.setItem(STORAGE_KEYS.DISH_REVIEWS, JSON.stringify(updated));
+
+    soundService.playSuccess();
+    emitRealtimeEvent('reviews', {
+      action: 'dish_review_added',
+      tableNumber: review.table_number,
+    });
+
+    fetch('/api/dish-reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(review),
+    }).catch(() => {});
+
+    return review;
   }
 
   public async resetAllDemoData(): Promise<void> {
@@ -858,12 +939,15 @@ class DataService {
     localStorage.removeItem(STORAGE_KEYS.ORDERS);
     localStorage.removeItem(STORAGE_KEYS.SERVICE_CALLS);
     localStorage.removeItem(STORAGE_KEYS.WAITERS);
+    localStorage.removeItem(STORAGE_KEYS.FEEDBACKS);
+    localStorage.removeItem(STORAGE_KEYS.DISH_REVIEWS);
     this.ensureInitialized();
     emitRealtimeEvent('orders');
     emitRealtimeEvent('menu');
     emitRealtimeEvent('tables');
     emitRealtimeEvent('service');
     emitRealtimeEvent('waiters');
+    emitRealtimeEvent('reviews');
   }
 }
 

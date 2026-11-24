@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AdminSidebar } from '../../components/AdminSidebar';
 import { AdminHeader } from '../../components/AdminHeader';
@@ -42,6 +42,74 @@ export const TableManagementPage: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedTableId, setSelectedTableId] = useState<string>(tables[0]?.id || 'table-12');
   const [copied, setCopied] = useState(false);
+
+  // QR Base URL resolution (auto-detect Wi-Fi LAN IP on localhost, or allow custom public URL)
+  const QR_BASE_URL_KEY = 'dineflow_qr_base_url_v1';
+  const [customQrBaseUrl, setCustomQrBaseUrl] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(QR_BASE_URL_KEY) || '';
+    }
+    return '';
+  });
+  const [detectedLanUrl, setDetectedLanUrl] = useState<string | null>(null);
+  const [editingQrUrl, setEditingQrUrl] = useState(false);
+  const [qrUrlInput, setQrUrlInput] = useState('');
+
+  useEffect(() => {
+    fetch('/api/network-info')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.lanUrl) {
+          setDetectedLanUrl(data.lanUrl);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const isLocalhostOrigin =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  const isPrivateDevPreview =
+    typeof window !== 'undefined' && window.location.hostname.startsWith('ais-dev-');
+
+  const effectiveQrBaseUrl = useMemo(() => {
+    const trimmed = customQrBaseUrl.trim().replace(/\/+$/, '');
+    if (trimmed) return trimmed;
+    if (isLocalhostOrigin && detectedLanUrl) return detectedLanUrl;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return '';
+  }, [customQrBaseUrl, isLocalhostOrigin, detectedLanUrl]);
+
+  const isPublicHttpsQr = useMemo(() => {
+    return (
+      effectiveQrBaseUrl.startsWith('https://') &&
+      !effectiveQrBaseUrl.includes('localhost') &&
+      !effectiveQrBaseUrl.includes('127.0.0.1') &&
+      !effectiveQrBaseUrl.includes('ais-dev-')
+    );
+  }, [effectiveQrBaseUrl]);
+
+  // Short clean QR URL (/t/1) -> fewer QR dots -> scans 2x faster on any smartphone camera
+  const getTableQrUrl = (table: RestaurantTable) => {
+    return `${effectiveQrBaseUrl}/t/${table.table_number}`;
+  };
+
+  const handleSaveQrBaseUrl = () => {
+    let cleaned = qrUrlInput.trim().replace(/\/+$/, '');
+    if (cleaned && !/^https?:\/\//i.test(cleaned)) {
+      cleaned = `https://${cleaned}`;
+    }
+    setCustomQrBaseUrl(cleaned);
+    if (cleaned) {
+      localStorage.setItem(QR_BASE_URL_KEY, cleaned);
+      addToast('success', 'Ochiq QR manzili saqlandi', `Barcha stol QR kodlari ${cleaned} manziliga ulandi.`);
+    } else {
+      localStorage.removeItem(QR_BASE_URL_KEY);
+      addToast('info', 'Avtomatik manzil', 'QR kodlar avtomatik tarmoq manziliga qaytarildi.');
+    }
+    setEditingQrUrl(false);
+  };
 
   // New table modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -108,7 +176,7 @@ export const TableManagementPage: React.FC = () => {
 
   const handleCopyUrl = () => {
     if (!inspectedTable) return;
-    const url = `${window.location.origin}/menu?table=${inspectedTable.table_number}`;
+    const url = getTableQrUrl(inspectedTable);
     navigator.clipboard.writeText(url);
     setCopied(true);
     addToast('success', 'Nusxalandi', `Stol №${inspectedTable.table_number} QR havolasi nusxalandi.`);
@@ -146,7 +214,7 @@ export const TableManagementPage: React.FC = () => {
   const handleDownloadQr = async () => {
     if (!inspectedTable) return;
     try {
-      const qrUrl = `${window.location.origin}/menu?table=${inspectedTable.table_number}&qr=${inspectedTable.qr_token || `qr-${inspectedTable.table_number}`}`;
+      const qrUrl = getTableQrUrl(inspectedTable);
       const qrDataUrl = await QRCode.toDataURL(qrUrl, {
         width: 500,
         margin: 2,
@@ -665,7 +733,7 @@ export const TableManagementPage: React.FC = () => {
                     {/* Real High-Contrast Scannable QR Code with Logo Badge */}
                     <div className="relative p-3 bg-white rounded-2xl shadow-md border border-[#E5E0D8]">
                       <RealQrCode
-                        value={`${window.location.origin}/menu?table=${inspectedTable.table_number}&qr=${inspectedTable.qr_token || `qr-${inspectedTable.table_number}`}`}
+                        value={getTableQrUrl(inspectedTable)}
                         size={176}
                       />
                       {/* Center Brand Icon */}
@@ -686,18 +754,108 @@ export const TableManagementPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Direct URL Box */}
+                    {/* Direct Real QR URL Box */}
                     <div className="mt-3 w-full py-1.5 px-3 bg-white rounded-xl border border-[#E5E0D8] flex items-center justify-between text-xs">
-                      <span className="text-[#737A75] truncate mr-2 select-all font-mono text-[11px]">
-                        dineflow.uz/menu?table={inspectedTable.table_number}
+                      <span
+                        className="text-[#737A75] truncate mr-2 select-all font-mono text-[11px]"
+                        title={getTableQrUrl(inspectedTable)}
+                      >
+                        {effectiveQrBaseUrl.replace(/^https?:\/\//, '')}/t/{inspectedTable.table_number}
                       </span>
                       <button
                         onClick={handleCopyUrl}
-                        className="text-[#173F35] hover:text-[#235B4E] p-1 rounded"
+                        className="text-[#173F35] hover:text-[#235B4E] p-1 rounded shrink-0"
                         title="Nusxalash"
                       >
                         {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
+                    </div>
+
+                    {/* QR Public Domain Configurator (Anti-Localhost & Private Dev Guard) */}
+                    <div className="mt-2.5 w-full text-left print:hidden">
+                      {editingQrUrl ? (
+                        <div className="p-3 bg-white rounded-xl border border-[#173F35]/30 space-y-2">
+                          <label className="block text-[10px] font-bold text-[#173F35] uppercase tracking-wider">
+                            Ochiq internet domeni (Publish URL)
+                          </label>
+                          <input
+                            type="text"
+                            value={qrUrlInput}
+                            onChange={(e) => setQrUrlInput(e.target.value)}
+                            placeholder="https://sizning-saytingiz.run.app"
+                            className="w-full px-2.5 py-2 rounded-lg border border-[#E5E0D8] text-xs font-mono text-[#202622] focus:outline-none focus:border-[#173F35]"
+                          />
+                          {detectedLanUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setQrUrlInput(detectedLanUrl)}
+                              className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                            >
+                              Lokal Wi-Fi IP ni qo'yish ({detectedLanUrl})
+                            </button>
+                          )}
+                          <div className="flex items-center justify-end gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingQrUrl(false)}
+                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#737A75] hover:bg-slate-100"
+                            >
+                              Bekor
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveQrBaseUrl}
+                              className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-[#173F35] text-white hover:bg-[#235B4E]"
+                            >
+                              Saqlash
+                            </button>
+                          </div>
+                        </div>
+                      ) : !isPublicHttpsQr ? (
+                        <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300/80 space-y-1.5">
+                          <p className="text-[11px] text-amber-950 leading-snug">
+                            {effectiveQrBaseUrl.includes('localhost') || effectiveQrBaseUrl.includes('127.0.0.1') ? (
+                              <span>
+                                <strong>Diqqat:</strong> localhost telefondan ochilmaydi. Ochiq (Publish) domenni kiriting.
+                              </span>
+                            ) : isPrivateDevPreview && !customQrBaseUrl ? (
+                              <span>
+                                <strong>Yopiq dev havola:</strong> Istalgan telefondan skanerlash uchun Publish qilingan ochiq domenni kiriting.
+                              </span>
+                            ) : (
+                              <span>
+                                <strong>Lokal Wi-Fi rejimi:</strong> Faqat bitta Wi-Fi da ishlaydi. Internet orqali ochish uchun ochiq domenni kiriting.
+                              </span>
+                            )}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQrUrlInput(customQrBaseUrl || '');
+                              setEditingQrUrl(true);
+                            }}
+                            className="w-full py-1.5 px-3 rounded-lg bg-[#173F35] hover:bg-[#235B4E] text-white text-[11px] font-bold transition-colors"
+                          >
+                            Ochiq domenni sozlash
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2 px-1">
+                          <span className="text-[11px] text-emerald-700 font-semibold">
+                            Ochiq internet domeni faol
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQrUrlInput(customQrBaseUrl || effectiveQrBaseUrl);
+                              setEditingQrUrl(true);
+                            }}
+                            className="text-[11px] font-bold text-[#173F35] hover:underline shrink-0"
+                          >
+                            O'zgartirish
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -795,7 +953,7 @@ export const TableManagementPage: React.FC = () => {
                     </button>
 
                     <a
-                      href={`/menu?table=${inspectedTable.table_number}&qr=${inspectedTable.qr_token || `qr-${inspectedTable.table_number}`}`}
+                      href={`/t/${inspectedTable.table_number}`}
                       className="w-full py-2.5 px-4 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center justify-center gap-2 border border-amber-300 transition-colors"
                     >
                       <ExternalLink className="w-4 h-4 text-amber-700" />

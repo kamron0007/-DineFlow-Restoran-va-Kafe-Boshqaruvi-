@@ -134,6 +134,25 @@ export interface CustomerFeedback {
   created_at: string;
 }
 
+export interface DishReview {
+  id: string;
+  menu_item_id: string;
+  dish_name: string;
+  table_number: number;
+  rating: number; // 1 to 5
+  comment: string;
+  customer_name?: string;
+  created_at: string;
+}
+
+export interface RestaurantRatingSummary {
+  averageRating: number;
+  totalReviews: number;
+  dishReviewsCount: number;
+  orderReviewsCount: number;
+  distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+}
+
 export interface CartItem {
   menuItem: MenuItem;
   quantity: number;

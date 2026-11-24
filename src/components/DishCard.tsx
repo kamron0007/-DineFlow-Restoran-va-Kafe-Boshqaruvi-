@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { MenuItem } from '../types';
 import { formatUZS } from '../utils/formatters';
-import { Plus, Minus, Clock, Utensils, Check } from 'lucide-react';
+import { Plus, Minus, Clock, Utensils, Check, Star, ClipboardList } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { DishModalTab } from './DishDetailModal';
 
 interface DishCardProps {
   dish: MenuItem;
-  onSelect: (dish: MenuItem) => void;
+  onSelect: (dish: MenuItem, initialTab?: DishModalTab) => void;
 }
 
 export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect }) => {
-  const { cart, addToCart, updateCartQuantity } = useApp();
+  const { cart, addToCart, updateCartQuantity, getDishRating } = useApp();
   const [imageError, setImageError] = useState(false);
   const [imgSrc, setImgSrc] = useState<string>(() => {
     return dish.image_url || `/images/dishes/${dish.id}.jpg`;
@@ -21,12 +22,16 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
     setImgSrc(dish.image_url || `/images/dishes/${dish.id}.jpg`);
   }, [dish.id, dish.image_url]);
 
-  // Total quantity of this dish currently in cart
-  const quantityInCart = useMemo(() => {
-    return cart
-      .filter((item) => item.menuItem.id === dish.id)
-      .reduce((sum, item) => sum + item.quantity, 0);
+  // Total quantity & whether any cart item for this dish has a special request
+  const { quantityInCart, hasSpecialNote } = useMemo(() => {
+    const matching = cart.filter((item) => item.menuItem.id === dish.id);
+    return {
+      quantityInCart: matching.reduce((sum, item) => sum + item.quantity, 0),
+      hasSpecialNote: matching.some((item) => Boolean(item.item_note && item.item_note.trim())),
+    };
   }, [cart, dish.id]);
+
+  const dishRating = getDishRating(dish.id);
 
   const handleImageError = () => {
     const fallback = `/images/dishes/${dish.id}.jpg`;
@@ -48,9 +53,14 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
     updateCartQuantity(dish.id, quantityInCart - 1);
   };
 
+  const handleOpenReviews = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelect(dish, 'reviews');
+  };
+
   return (
     <div
-      onClick={() => onSelect(dish)}
+      onClick={() => onSelect(dish, 'order')}
       className={`group relative bg-white rounded-2xl p-3 border transition-all duration-150 cursor-pointer flex flex-col justify-between ${
         !dish.is_available
           ? 'opacity-65 grayscale-[30%] border-[#E5E0D8]'
@@ -83,11 +93,11 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             </div>
           )}
 
-          {/* Prep time or Selected Quantity badge */}
+          {/* Prep time or Selected Quantity indicator */}
           {quantityInCart > 0 ? (
             <div className="absolute top-2 left-2 bg-[#173F35] text-amber-300 text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg shadow-md flex items-center gap-1 tabular-nums">
               <Check className="w-3 h-3 text-emerald-400" />
-              <span>{quantityInCart} dona tanlandi</span>
+              <span>{quantityInCart} dona</span>
             </div>
           ) : (
             <div className="absolute top-2 left-2 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-2 py-0.5 rounded-md flex items-center gap-1 tabular-nums">
@@ -96,37 +106,83 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             </div>
           )}
 
-          {/* Tier badge: Oddiy / Biznes / VIP */}
-          <div className="absolute top-2 right-2 flex items-center gap-1">
-            {dish.tier === 'vip' ? (
-              <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow-xs">
-                ★ VIP
-              </span>
-            ) : dish.tier === 'biznes' ? (
-              <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs">
-                Biznes
-              </span>
-            ) : dish.tier === 'oddiy' ? (
-              <span className="bg-emerald-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs">
-                Oddiy
-              </span>
-            ) : null}
-          </div>
+          {/* Tier label */}
+          {dish.tier && (
+            <div className="absolute top-2 right-2">
+              {dish.tier === 'vip' ? (
+                <span className="bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded-md shadow-xs">
+                  VIP
+                </span>
+              ) : dish.tier === 'biznes' ? (
+                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs">
+                  Biznes
+                </span>
+              ) : (
+                <span className="bg-emerald-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-xs">
+                  Oddiy
+                </span>
+              )}
+            </div>
+          )}
 
-          {/* Availability Badge */}
+          {/* Availability Overlay */}
           {!dish.is_available && (
             <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center">
-              <span className="bg-red-500/90 text-white text-xs font-semibold px-2.5 py-1 rounded-full shadow">
+              <span className="bg-red-600/95 text-white text-xs font-semibold px-3 py-1 rounded-lg shadow">
                 Vaqtincha tugagan
               </span>
             </div>
           )}
         </div>
 
-        {/* Dish Title & Description */}
-        <h3 className="font-display font-bold text-base text-[#202622] group-hover:text-[#173F35] transition-colors line-clamp-1 mb-0.5">
+        {/* Dish Title */}
+        <h3 className="font-display font-bold text-base text-[#202622] group-hover:text-[#173F35] transition-colors line-clamp-1">
           {dish.name}
         </h3>
+
+        {/* Clean Unboxed Metadata Row: Star Rating + Rate trigger + Talabnoma indicator */}
+        <div className="flex items-center justify-between gap-2 mt-1 mb-1.5 text-xs">
+          <button
+            type="button"
+            onClick={handleOpenReviews}
+            className="inline-flex items-center gap-1 text-[#202622] hover:text-[#173F35] font-semibold transition-colors py-0.5"
+            title="Taomni baholash va sharhlarni ko'rish"
+          >
+            <Star
+              className={`w-3.5 h-3.5 ${
+                dishRating.count > 0
+                  ? 'fill-amber-400 text-amber-400'
+                  : 'text-[#B5AFA4]'
+              }`}
+            />
+            {dishRating.count > 0 ? (
+              <span className="tabular-nums">
+                {dishRating.average.toFixed(1)}{' '}
+                <span className="text-[#737A75] font-normal">({dishRating.count})</span>
+              </span>
+            ) : (
+              <span className="text-[#737A75] font-medium hover:text-[#173F35]">Baholash</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(dish, 'order');
+            }}
+            className={`inline-flex items-center gap-1 text-[11px] font-medium transition-colors ${
+              hasSpecialNote
+                ? 'text-amber-700 font-semibold'
+                : 'text-[#737A75] hover:text-[#173F35]'
+            }`}
+            title="Taomga talabnoma yozish"
+          >
+            <ClipboardList className="w-3 h-3" />
+            <span>{hasSpecialNote ? 'Talabnoma bor' : 'Talabnoma'}</span>
+          </button>
+        </div>
+
         <p className="text-xs text-[#737A75] line-clamp-2 leading-relaxed mb-2.5">
           {dish.description}
         </p>
@@ -139,7 +195,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             {formatUZS(dish.price)}
           </span>
           {dish.weight_or_portion && (
-            <span className="text-[10px] text-[#737A75] truncate">{dish.weight_or_portion}</span>
+            <span className="text-[11px] text-[#737A75] truncate">{dish.weight_or_portion}</span>
           )}
         </div>
 
@@ -151,7 +207,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             <button
               type="button"
               onClick={handleDecrement}
-              className="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 active:scale-95 flex items-center justify-center transition-all"
+              className="w-8 h-8 rounded-lg bg-white/15 hover:bg-white/25 active:scale-95 flex items-center justify-center transition-all"
               aria-label="Kamaytirish"
             >
               <Minus className="w-3.5 h-3.5" />
@@ -162,7 +218,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             <button
               type="button"
               onClick={handleQuickAdd}
-              className="w-7 h-7 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 active:scale-95 flex items-center justify-center transition-all"
+              className="w-8 h-8 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 active:scale-95 flex items-center justify-center transition-all"
               aria-label="Ko'paytirish"
             >
               <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -173,7 +229,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
             type="button"
             onClick={handleQuickAdd}
             disabled={!dish.is_available}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all shrink-0 ${
+            className={`min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all shrink-0 whitespace-nowrap ${
               dish.is_available
                 ? 'bg-[#173F35] text-white hover:bg-[#235B4E] active:scale-95 shadow-xs'
                 : 'bg-slate-100 text-slate-400 cursor-not-allowed'

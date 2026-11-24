@@ -12,9 +12,9 @@ export const CustomerBottomNav: React.FC = () => {
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E5E0D8] shadow-[0_-4px_16px_rgba(32,38,34,0.06)] md:hidden">
         <div className="flex items-center justify-around h-16 max-w-md mx-auto px-2">
           <NavLink
-            to={`/menu?table=${activeTableNumber}`}
+            to={`/t/${activeTableNumber}`}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center min-w-[56px] py-1 text-xs transition-colors ${
+              `flex flex-col items-center justify-center min-w-[56px] min-h-[44px] py-1 text-xs transition-colors ${
                 isActive ? 'text-[#173F35] font-semibold' : 'text-[#737A75] hover:text-[#202622]'
               }`
             }

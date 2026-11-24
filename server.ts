@@ -1,20 +1,52 @@
-import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express, { type Request, type Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   INITIAL_CATEGORIES,
+  INITIAL_DISH_REVIEWS,
   INITIAL_MENU_ITEMS,
   INITIAL_ORDERS,
   INITIAL_TABLES,
-} from './src/services/seedData';
-import { Category, MenuItem, Order, OrderItem, OrderStatus, ServiceCall } from './src/types';
+} from './src/services/seedData.ts';
+import type {
+  Category,
+  CustomerFeedback,
+  DishReview,
+  MenuItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+  ServiceCall,
+} from './src/types/index.ts';
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT) || 3000;
+
+function getLocalNetworkIp(): string | null {
+  const interfaces = os.networkInterfaces();
+  let fallbackIp: string | null = null;
+  for (const name of Object.keys(interfaces)) {
+    const ifaceList = interfaces[name];
+    if (!ifaceList) continue;
+    for (const iface of ifaceList) {
+      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.')) {
+        if (
+          iface.address.startsWith('192.168.') ||
+          iface.address.startsWith('10.') ||
+          iface.address.startsWith('172.')
+        ) {
+          return iface.address;
+        }
+        if (!fallbackIp) fallbackIp = iface.address;
+      }
+    }
+  }
+  return fallbackIp;
+}
 
 // Persistent JSON Database File (data/db.json)
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -25,6 +57,8 @@ interface PersistentDatabase {
   menu_items: MenuItem[];
   orders: Order[];
   service_calls: ServiceCall[];
+  dish_reviews: DishReview[];
+  feedbacks: CustomerFeedback[];
   updated_at: string;
 }
 
@@ -46,6 +80,11 @@ function loadDatabase(): PersistentDatabase {
           menu_items: parsed.menu_items,
           orders: parsed.orders,
           service_calls: Array.isArray(parsed.service_calls) ? parsed.service_calls : [],
+          dish_reviews:
+            Array.isArray(parsed.dish_reviews) && parsed.dish_reviews.length > 0
+              ? parsed.dish_reviews
+              : [...INITIAL_DISH_REVIEWS],
+          feedbacks: Array.isArray(parsed.feedbacks) ? parsed.feedbacks : [],
           updated_at: parsed.updated_at || new Date().toISOString(),
         };
       }
@@ -59,6 +98,8 @@ function loadDatabase(): PersistentDatabase {
     menu_items: [...INITIAL_MENU_ITEMS],
     orders: [...INITIAL_ORDERS],
     service_calls: [],
+    dish_reviews: [...INITIAL_DISH_REVIEWS],
+    feedbacks: [],
     updated_at: new Date().toISOString(),
   };
   saveDatabase(initialDb);
@@ -676,6 +717,16 @@ async function startServer() {
     res.json(dbState.orders[idx]);
   });
 
+  // 5a. Network Info (so local QR codes can use Wi-Fi LAN IP instead of localhost)
+  app.get('/api/network-info', (_req: Request, res: Response) => {
+    const lanIp = getLocalNetworkIp();
+    res.json({
+      lanIp,
+      port: PORT,
+      lanUrl: lanIp ? `http://${lanIp}:${PORT}` : null,
+    });
+  });
+
   // 5b. Service Calls (Waiter Call & Real-time Status)
   app.get('/api/service-calls', (_req: Request, res: Response) => {
     res.json(dbState.service_calls || []);
@@ -755,18 +806,107 @@ async function startServer() {
     res.json({ success: true, call: resolvedCall });
   });
 
+  // 5c. Dish Reviews (Taomlarni yulduzcha va izoh bilan baholash -> Restoran reytingiga ta'sir qiladi)
+  app.get('/api/dish-reviews', (req: Request, res: Response) => {
+    const { menu_item_id } = req.query;
+    let list = [...(dbState.dish_reviews || [])];
+    if (menu_item_id) {
+      list = list.filter((r) => r.menu_item_id === String(menu_item_id));
+    }
+    res.json(list);
+  });
+
+  app.post('/api/dish-reviews', (req: Request, res: Response) => {
+    const { id, menu_item_id, dish_name, table_number, rating, comment, customer_name, created_at } =
+      req.body || {};
+
+    const numericRating = Math.round(Number(rating));
+    if (!menu_item_id || isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+      return res
+        .status(400)
+        .json({ error: "menu_item_id va 1 dan 5 gacha baho (rating) kiritilishi shart" });
+    }
+
+    const matchedDish = dbState.menu_items.find((m) => m.id === String(menu_item_id));
+    const review: DishReview = {
+      id: id ? String(id) : `rev-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      menu_item_id: String(menu_item_id),
+      dish_name: dish_name ? String(dish_name).trim().slice(0, 120) : matchedDish?.name || 'Taom',
+      table_number: Math.max(1, Number(table_number) || 1),
+      rating: numericRating,
+      comment: comment ? String(comment).trim().slice(0, 400) : '',
+      customer_name: customer_name ? String(customer_name).trim().slice(0, 60) : undefined,
+      created_at: created_at ? String(created_at) : new Date().toISOString(),
+    };
+
+    dbState.dish_reviews = [
+      review,
+      ...(dbState.dish_reviews || []).filter((r) => r.id !== review.id),
+    ];
+    saveDatabase(dbState);
+    res.status(201).json(review);
+  });
+
+  // 5d. Order Feedbacks (Umumiy xizmat baholari)
+  app.get('/api/feedbacks', (_req: Request, res: Response) => {
+    res.json(dbState.feedbacks || []);
+  });
+
+  app.post('/api/feedbacks', (req: Request, res: Response) => {
+    const body = req.body || {};
+    const overall = Math.round(Number(body.overall_rating));
+    if (!body.order_id || isNaN(overall) || overall < 1 || overall > 5) {
+      return res.status(400).json({ error: "order_id va 1-5 oralig'idagi baho shart" });
+    }
+    const feedback: CustomerFeedback = {
+      id: body.id ? String(body.id) : `feedback-${Date.now()}`,
+      order_id: String(body.order_id),
+      order_number: String(body.order_number || ''),
+      table_number: Math.max(1, Number(body.table_number) || 1),
+      waiter_name: body.waiter_name ? String(body.waiter_name).slice(0, 80) : undefined,
+      overall_rating: overall,
+      food_rating: body.food_rating ? Math.min(5, Math.max(1, Number(body.food_rating))) : undefined,
+      speed_rating: body.speed_rating ? Math.min(5, Math.max(1, Number(body.speed_rating))) : undefined,
+      waiter_rating: body.waiter_rating ? Math.min(5, Math.max(1, Number(body.waiter_rating))) : undefined,
+      atmosphere_rating: body.atmosphere_rating
+        ? Math.min(5, Math.max(1, Number(body.atmosphere_rating)))
+        : undefined,
+      tags: Array.isArray(body.tags) ? body.tags.map((t: unknown) => String(t).slice(0, 60)) : [],
+      comment: body.comment ? String(body.comment).trim().slice(0, 500) : '',
+      customer_name: body.customer_name ? String(body.customer_name).trim().slice(0, 60) : undefined,
+      customer_phone: body.customer_phone ? String(body.customer_phone).trim().slice(0, 30) : undefined,
+      tip_amount: body.tip_amount ? Math.max(0, Number(body.tip_amount)) : undefined,
+      created_at: body.created_at ? String(body.created_at) : new Date().toISOString(),
+    };
+
+    dbState.feedbacks = [
+      feedback,
+      ...(dbState.feedbacks || []).filter((f) => f.id !== feedback.id),
+    ];
+    saveDatabase(dbState);
+    res.status(201).json(feedback);
+  });
+
   // 6. Reset Database Endpoint
   app.post('/api/reset', (_req: Request, res: Response) => {
     dbState.categories = [...INITIAL_CATEGORIES];
     dbState.menu_items = [...INITIAL_MENU_ITEMS];
     dbState.orders = [...INITIAL_ORDERS];
     dbState.service_calls = [];
+    dbState.dish_reviews = [...INITIAL_DISH_REVIEWS];
+    dbState.feedbacks = [];
     saveDatabase(dbState);
     res.json({ status: 'reset_ok', timestamp: dbState.updated_at });
   });
 
-  // Mount Vite Dev Server or Production Static Assets
+  // Return JSON 404 for unknown API routes so they never fall through to SPA HTML
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'API endpoint topilmadi' });
+  });
+
+  // Mount Vite Dev Server or Production Static Assets (SPA deep-link fallback for /t/:tableNum, /menu, /admin, /waiter)
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -781,7 +921,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
+    const lanIp = getLocalNetworkIp();
     console.log(`🚀 DineFlow REST API & Server ishga tushdi: http://localhost:${PORT}`);
+    if (lanIp) {
+      console.log(`📱 Telefon / QR uchun (Wi-Fi): http://${lanIp}:${PORT}`);
+    }
     console.log(`💾 Doimiy JSON Baza:     ${DB_FILE}`);
     console.log(`📘 OpenAPI / Swagger UI: http://localhost:${PORT}/api/docs`);
     console.log(`📄 OpenAPI JSON:         http://localhost:${PORT}/api/openapi.json`);

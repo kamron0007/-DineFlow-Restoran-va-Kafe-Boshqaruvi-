@@ -515,10 +515,17 @@ export const WaiterDashboard: React.FC = () => {
                     <div className="py-3 space-y-1.5">
                       {order.items.map((item) => (
                         <div key={item.id} className="text-xs flex items-start justify-between gap-2">
-                          <span className="text-[#202622]">
-                            <strong className="text-[#173F35]">{item.quantity}x</strong> {item.item_name}
-                          </span>
-                          <span className="text-[#737A75] font-mono tabular-nums">
+                          <div className="min-w-0">
+                            <span className="text-[#202622] block">
+                              <strong className="text-[#173F35]">{item.quantity}x</strong> {item.item_name}
+                            </span>
+                            {item.item_note && (
+                              <span className="text-[11px] text-amber-800 block mt-0.5">
+                                Talabnoma: <span className="italic">"{item.item_note}"</span>
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[#737A75] font-mono tabular-nums shrink-0">
                             {formatUZS(item.line_total)}
                           </span>
                         </div>
@@ -526,7 +533,7 @@ export const WaiterDashboard: React.FC = () => {
 
                       {order.customer_note && (
                         <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg mt-2 italic">
-                          "{order.customer_note}"
+                          Umumiy izoh: "{order.customer_note}"
                         </p>
                       )}
                     </div>

@@ -11,6 +11,8 @@ import {
   Waiter,
   WaiterShiftStatus,
   CustomerFeedback,
+  DishReview,
+  RestaurantRatingSummary,
 } from '../types';
 import { dataService } from '../services/storage';
 import { INITIAL_PROFILES } from '../services/seedData';
@@ -91,8 +93,9 @@ interface AppContextType {
   // Cart
   cart: CartItem[];
   addToCart: (item: MenuItem, quantity?: number, note?: string) => void;
-  updateCartQuantity: (itemId: string, quantity: number) => void;
-  removeFromCart: (itemId: string) => void;
+  updateCartQuantity: (itemId: string, quantity: number, itemIndex?: number) => void;
+  updateCartItemNote: (itemIndex: number, note: string) => void;
+  removeFromCart: (itemId: string, itemIndex?: number) => void;
   clearCart: () => void;
   cartTotal: number;
   cartItemCount: number;
@@ -135,7 +138,18 @@ interface AppContextType {
   deleteWaiter: (id: string) => Promise<void>;
   updateWaiterStatus: (id: string, status: WaiterShiftStatus) => Promise<void>;
 
-  // Customer Feedback & Reviews
+  // Customer Feedback, Dish Reviews & Live Restaurant Rating
+  dishReviews: DishReview[];
+  feedbacks: CustomerFeedback[];
+  restaurantRating: RestaurantRatingSummary;
+  getDishRating: (menuItemId: string) => { average: number; count: number };
+  submitDishReview: (params: {
+    menu_item_id: string;
+    dish_name: string;
+    rating: number;
+    comment: string;
+    customer_name?: string;
+  }) => Promise<DishReview>;
   submitOrderFeedback: (feedback: Omit<CustomerFeedback, 'id' | 'created_at'>) => Promise<void>;
   getFeedbackForOrder: (orderId: string) => Promise<CustomerFeedback | null>;
 
@@ -154,20 +168,29 @@ const CART_STORAGE_KEY = 'dineflow_customer_cart_v1';
 const TABLE_STORAGE_KEY = 'dineflow_active_table_v1';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Read table from URL params if present e.g. ?table=12 or localStorage
+  // Read table synchronously from scanned QR path (/t/5, /table/5) or query (?table=5)
   const getInitialTable = (): number => {
     if (typeof window !== 'undefined') {
+      const pathMatch = window.location.pathname.match(/^\/(?:t|table)\/(\d+)/i);
+      if (pathMatch && pathMatch[1]) {
+        const parsedPathTable = Number(pathMatch[1]);
+        if (!isNaN(parsedPathTable) && parsedPathTable > 0) {
+          localStorage.setItem(TABLE_STORAGE_KEY, String(parsedPathTable));
+          return parsedPathTable;
+        }
+      }
       const params = new URLSearchParams(window.location.search);
       const urlTable = params.get('table');
-      if (urlTable && !isNaN(Number(urlTable))) {
+      if (urlTable && !isNaN(Number(urlTable)) && Number(urlTable) > 0) {
+        localStorage.setItem(TABLE_STORAGE_KEY, String(Number(urlTable)));
         return Number(urlTable);
       }
       const saved = localStorage.getItem(TABLE_STORAGE_KEY);
-      if (saved && !isNaN(Number(saved))) {
+      if (saved && !isNaN(Number(saved)) && Number(saved) > 0) {
         return Number(saved);
       }
     }
-    return 12; // Default to table 12 from mockup
+    return 1;
   };
 
   const [activeTableNumber, setActiveTableNumberState] = useState<number>(getInitialTable);
@@ -179,6 +202,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orders, setOrders] = useState<Order[]>([]);
   const [serviceCalls, setServiceCalls] = useState<ServiceCall[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
+  const [dishReviews, setDishReviews] = useState<DishReview[]>([]);
+  const [feedbacks, setFeedbacks] = useState<CustomerFeedback[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(soundService.isEnabled());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -269,11 +294,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addToast = useCallback(
     (type: ToastMessage['type'], title: string, message?: string, meta?: ToastMeta) => {
-      // Strictly enforce: On Customer screen, ONLY waiter-related notifications are displayed
+      // Strictly enforce: On Customer QR screens, ONLY waiter-related notifications are displayed
       if (typeof window !== 'undefined') {
         const path = window.location.pathname;
         const isCustomerScreen =
-          !path.startsWith('/waiter') && !path.startsWith('/admin') && !path.startsWith('/kitchen');
+          path.startsWith('/t/') ||
+          path.startsWith('/table/') ||
+          path.startsWith('/menu') ||
+          path.startsWith('/cart') ||
+          path.startsWith('/orders');
         if (isCustomerScreen && type !== 'waiter_response') {
           return;
         }
@@ -344,9 +373,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [activeTableNumber]);
 
   // Helper to check which screen the user is currently viewing
-  const getScreenContext = (): 'customer' | 'waiter' | 'admin' | 'kitchen' => {
+  const getScreenContext = (): 'customer' | 'waiter' | 'admin' | 'kitchen' | 'auth' => {
     if (typeof window === 'undefined') return 'customer';
     const path = window.location.pathname;
+    if (path === '/' || path.startsWith('/login')) return 'auth';
     if (path.startsWith('/waiter')) return 'waiter';
     if (path.startsWith('/admin')) return 'admin';
     if (path.startsWith('/kitchen')) return 'kitchen';
@@ -431,11 +461,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [addToast]
   );
 
-  // Trigger kitchen ready alert (Waiter & Admin only, never Customer)
+  // Trigger kitchen ready alert (Waiter & Admin only, never Customer or Login)
   const notifyKitchenReady = useCallback(
     (order: { id: string; order_number?: string; table_number: number }) => {
       const screen = getScreenContext();
-      if (screen === 'customer') return;
+      if (screen !== 'waiter' && screen !== 'admin') return;
 
       const key = `${order.id}_ready`;
       if (handledTransitionsRef.current.has(key)) return;
@@ -504,8 +534,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       assigned_waiter_name?: string;
     }) => {
       const screen = getScreenContext();
-      // Never show staff call popups on Customer or Kitchen screens
-      if (screen === 'customer' || screen === 'kitchen') return;
+      // Never show staff call popups on Customer, Kitchen, or Login screens
+      if (screen !== 'waiter' && screen !== 'admin') return;
 
       const count = call.call_count || 1;
       const isEscalated = Boolean(call.escalated_to_admin || count >= 2);
@@ -600,13 +630,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Fetch all live data
   const refreshData = useCallback(async () => {
     try {
-      const [cats, items, tbls, ords, calls, wtrs] = await Promise.all([
+      const [cats, items, tbls, ords, calls, wtrs, revs, fbs] = await Promise.all([
         dataService.getCategories(),
         dataService.getMenuItems(),
         dataService.getTables(),
         dataService.getOrders(),
         dataService.getServiceCalls(),
         dataService.getWaiters(),
+        dataService.getDishReviews(),
+        dataService.getFeedbacks(),
       ]);
 
       // Check state diffs for real-time alerts
@@ -672,6 +704,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setOrders(ords);
       setServiceCalls(calls);
       setWaiters(wtrs);
+      setDishReviews(revs);
+      setFeedbacks(fbs);
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
@@ -802,19 +836,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, [addToast]);
 
-  const updateCartQuantity = useCallback((itemId: string, quantity: number) => {
-    soundService.playTick();
-    setCart((prev) => {
-      if (quantity <= 0) {
-        return prev.filter((ci) => ci.menuItem.id !== itemId);
-      }
-      return prev.map((ci) => (ci.menuItem.id === itemId ? { ...ci, quantity } : ci));
-    });
+  const updateCartQuantity = useCallback(
+    (itemId: string, quantity: number, itemIndex?: number) => {
+      soundService.playTick();
+      setCart((prev) => {
+        if (itemIndex !== undefined && itemIndex >= 0 && itemIndex < prev.length) {
+          if (quantity <= 0) {
+            return prev.filter((_, idx) => idx !== itemIndex);
+          }
+          return prev.map((ci, idx) => (idx === itemIndex ? { ...ci, quantity } : ci));
+        }
+        if (quantity <= 0) {
+          return prev.filter((ci) => ci.menuItem.id !== itemId);
+        }
+        // Update last matching row when decrementing/incrementing from MenuPage card
+        let updatedOne = false;
+        const result: CartItem[] = [];
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const ci = prev[i];
+          if (!updatedOne && ci.menuItem.id === itemId) {
+            updatedOne = true;
+            const otherQty = prev.reduce(
+              (acc, x, idx) => (idx !== i && x.menuItem.id === itemId ? acc + x.quantity : acc),
+              0
+            );
+            const targetRowQty = quantity - otherQty;
+            if (targetRowQty > 0) {
+              result.unshift({ ...ci, quantity: targetRowQty });
+            }
+          } else {
+            result.unshift(ci);
+          }
+        }
+        return result;
+      });
+    },
+    []
+  );
+
+  const updateCartItemNote = useCallback((itemIndex: number, note: string) => {
+    const cleanNote = note.slice(0, 160);
+    setCart((prev) =>
+      prev.map((ci, idx) =>
+        idx === itemIndex ? { ...ci, item_note: cleanNote } : ci
+      )
+    );
   }, []);
 
-  const removeFromCart = useCallback((itemId: string) => {
+  const removeFromCart = useCallback((itemId: string, itemIndex?: number) => {
     soundService.playTick();
-    setCart((prev) => prev.filter((ci) => ci.menuItem.id !== itemId));
+    setCart((prev) => {
+      if (itemIndex !== undefined && itemIndex >= 0 && itemIndex < prev.length) {
+        return prev.filter((_, idx) => idx !== itemIndex);
+      }
+      return prev.filter((ci) => ci.menuItem.id !== itemId);
+    });
   }, []);
 
   const clearCart = useCallback(() => {
@@ -994,6 +1070,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [addToast]
   );
 
+  const getDishRating = useCallback(
+    (menuItemId: string): { average: number; count: number } => {
+      const matching = dishReviews.filter((r) => r.menu_item_id === menuItemId);
+      if (matching.length === 0) return { average: 0, count: 0 };
+      const sum = matching.reduce((acc, r) => acc + r.rating, 0);
+      return {
+        average: Number((sum / matching.length).toFixed(1)),
+        count: matching.length,
+      };
+    },
+    [dishReviews]
+  );
+
+  // Live Restaurant Rating computed dynamically from ALL dish reviews + ALL order service feedbacks
+  const restaurantRating = useMemo<RestaurantRatingSummary>(() => {
+    const distribution: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const allScores: number[] = [];
+
+    dishReviews.forEach((r) => {
+      const clamped = Math.min(5, Math.max(1, Math.round(r.rating))) as 1 | 2 | 3 | 4 | 5;
+      distribution[clamped] += 1;
+      allScores.push(clamped);
+    });
+
+    feedbacks.forEach((f) => {
+      const clamped = Math.min(5, Math.max(1, Math.round(f.overall_rating))) as 1 | 2 | 3 | 4 | 5;
+      distribution[clamped] += 1;
+      allScores.push(clamped);
+    });
+
+    const total = allScores.length;
+    const avg = total > 0 ? Number((allScores.reduce((a, b) => a + b, 0) / total).toFixed(1)) : 5.0;
+
+    return {
+      averageRating: avg,
+      totalReviews: total,
+      dishReviewsCount: dishReviews.length,
+      orderReviewsCount: feedbacks.length,
+      distribution,
+    };
+  }, [dishReviews, feedbacks]);
+
+  const submitDishReview = useCallback(
+    async (params: {
+      menu_item_id: string;
+      dish_name: string;
+      rating: number;
+      comment: string;
+      customer_name?: string;
+    }): Promise<DishReview> => {
+      const clampedRating = Math.min(5, Math.max(1, Math.round(params.rating)));
+      const newReview: DishReview = {
+        id: 'rev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        menu_item_id: params.menu_item_id,
+        dish_name: params.dish_name,
+        table_number: activeTableNumber,
+        rating: clampedRating,
+        comment: params.comment.trim().slice(0, 400),
+        customer_name: params.customer_name?.trim().slice(0, 60) || undefined,
+        created_at: new Date().toISOString(),
+      };
+
+      const saved = await dataService.saveDishReview(newReview);
+      // Immediately update state so dish rating & restaurant rating react instantly
+      setDishReviews((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
+      return saved;
+    },
+    [activeTableNumber]
+  );
+
   const submitOrderFeedback = useCallback(
     async (feedbackData: Omit<CustomerFeedback, 'id' | 'created_at'>) => {
       const newFeedback: CustomerFeedback = {
@@ -1002,6 +1148,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         created_at: new Date().toISOString(),
       };
       await dataService.saveFeedback(newFeedback);
+      setFeedbacks((prev) => [newFeedback, ...prev.filter((f) => f.id !== newFeedback.id)]);
       try {
         confetti({
           particleCount: 70,
@@ -1024,8 +1171,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getFeedbackForOrder = useCallback(
     async (orderId: string): Promise<CustomerFeedback | null> => {
-      const feedbacks = await dataService.getFeedbacks();
-      return feedbacks.find((f) => f.order_id === orderId) || null;
+      const allFeedbacks = await dataService.getFeedbacks();
+      return allFeedbacks.find((f) => f.order_id === orderId) || null;
     },
     []
   );
@@ -1041,6 +1188,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cart,
       addToCart,
       updateCartQuantity,
+      updateCartItemNote,
       removeFromCart,
       clearCart,
       cartTotal,
@@ -1051,6 +1199,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       orders,
       serviceCalls,
       waiters,
+      dishReviews,
+      feedbacks,
+      restaurantRating,
+      getDishRating,
+      submitDishReview,
       addWaiter,
       updateWaiter,
       deleteWaiter,
@@ -1091,6 +1244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cart,
       addToCart,
       updateCartQuantity,
+      updateCartItemNote,
       removeFromCart,
       clearCart,
       cartTotal,
@@ -1101,6 +1255,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       orders,
       serviceCalls,
       waiters,
+      dishReviews,
+      feedbacks,
+      restaurantRating,
+      getDishRating,
+      submitDishReview,
       addWaiter,
       updateWaiter,
       deleteWaiter,

@@ -3,7 +3,8 @@ import { useApp } from '../../context/AppContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { DishCard } from '../../components/DishCard';
-import { DishDetailModal } from '../../components/DishDetailModal';
+import { DishDetailModal, DishModalTab } from '../../components/DishDetailModal';
+import { RestaurantReviewsModal } from '../../components/RestaurantReviewsModal';
 import { MenuItem } from '../../types';
 import { formatUZS, ORDER_STATUS_MAP } from '../../utils/formatters';
 import {
@@ -16,6 +17,8 @@ import {
   Bell,
   CheckCircle2,
   Clock,
+  Star,
+  ChevronRight,
 } from 'lucide-react';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 
@@ -34,15 +37,24 @@ export const MenuPage: React.FC = () => {
     cart,
     cartTotal,
     cartItemCount,
+    restaurantName,
+    restaurantRating,
   } = useApp();
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('cat-all');
   const [selectedTier, setSelectedTier] = useState<'all' | 'oddiy' | 'biznes' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDish, setSelectedDish] = useState<MenuItem | null>(null);
+  const [selectedDishTab, setSelectedDishTab] = useState<DishModalTab>('order');
+  const [isRestaurantReviewsOpen, setIsRestaurantReviewsOpen] = useState<boolean>(false);
   const [isQuickOrdering, setIsQuickOrdering] = useState<boolean>(false);
   const [searchParams] = useSearchParams();
   const { tableNum } = useParams<{ tableNum?: string }>();
   const navigate = useNavigate();
+
+  const handleOpenDish = (dish: MenuItem, initialTab: DishModalTab = 'order') => {
+    setSelectedDishTab(initialTab);
+    setSelectedDish(dish);
+  };
 
   // Automatically detect and lock table number from scanned QR URL (/t/1 or /menu?table=1)
   useEffect(() => {
@@ -190,6 +202,34 @@ export const MenuPage: React.FC = () => {
           </button>
         </div>
 
+        {/* Live Restaurant Rating & Reviews Trigger Bar */}
+        <button
+          type="button"
+          onClick={() => setIsRestaurantReviewsOpen(true)}
+          className="w-full mb-3 min-h-[48px] bg-white hover:bg-[#FCFBF8] active:scale-[0.995] rounded-2xl border border-[#E5E0D8] px-3.5 py-2.5 shadow-xs flex items-center justify-between gap-3 text-left transition-all"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-1 text-[#173F35] shrink-0">
+              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+              <span className="font-display font-extrabold text-sm tabular-nums">
+                {restaurantRating.averageRating.toFixed(1)}
+              </span>
+            </div>
+            <span className="text-[#D6D1C7]" aria-hidden="true">·</span>
+            <div className="text-xs text-[#57605B] truncate">
+              <span className="font-semibold text-[#202622]">
+                {restaurantName || 'Zafaran Grand'} reytingi
+              </span>
+              <span className="mx-1.5 text-[#A5A096]" aria-hidden="true">·</span>
+              <span className="tabular-nums">{restaurantRating.totalReviews} ta baho</span>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1 text-xs font-bold text-[#173F35] whitespace-nowrap shrink-0">
+            <span>Baholash va sharhlar</span>
+            <ChevronRight className="w-4 h-4" />
+          </span>
+        </button>
+
         {/* Live Active Order Banner if table has an active order */}
         {activeTableOrder && (
           <div
@@ -313,7 +353,7 @@ export const MenuPage: React.FC = () => {
         {filteredDishes.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
             {filteredDishes.map((dish) => (
-              <DishCard key={dish.id} dish={dish} onSelect={(d) => setSelectedDish(d)} />
+              <DishCard key={dish.id} dish={dish} onSelect={handleOpenDish} />
             ))}
           </div>
         ) : (
@@ -378,8 +418,18 @@ export const MenuPage: React.FC = () => {
         </div>
       )}
 
-      {/* Dish Detail Modal */}
-      <DishDetailModal dish={selectedDish} onClose={() => setSelectedDish(null)} />
+      {/* Dish Detail & Rating Modal */}
+      <DishDetailModal
+        dish={selectedDish}
+        initialTab={selectedDishTab}
+        onClose={() => setSelectedDish(null)}
+      />
+
+      {/* Restaurant Overall Rating & Reviews Modal */}
+      <RestaurantReviewsModal
+        isOpen={isRestaurantReviewsOpen}
+        onClose={() => setIsRestaurantReviewsOpen(false)}
+      />
 
       {/* Mobile Bottom Navigation */}
       <CustomerBottomNav />

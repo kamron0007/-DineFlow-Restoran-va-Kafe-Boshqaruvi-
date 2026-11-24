@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { formatUZS, formatTimeAgo, formatShortTime, ORDER_STATUS_MAP } from '../../utils/formatters';
-import { OrderStatus } from '../../types';
+import { MenuItem, OrderStatus } from '../../types';
 import {
   Clock,
   CheckCircle2,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CustomerFeedbackModal } from '../../components/CustomerFeedbackModal';
+import { DishDetailModal } from '../../components/DishDetailModal';
 
 const STATUS_STEPS: { key: OrderStatus; label: string; desc: string }[] = [
   { key: 'new', label: 'Qabul qilindi', desc: 'Oshxonaga uzatildi' },
@@ -27,7 +28,7 @@ const STATUS_STEPS: { key: OrderStatus; label: string; desc: string }[] = [
 ];
 
 export const OrderTrackPage: React.FC = () => {
-  const { orders, activeTableNumber, callWaiter, requestBill, settleAndFreeTable } = useApp();
+  const { orders, menuItems, activeTableNumber, callWaiter, requestBill, getDishRating } = useApp();
   const [searchParams] = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
   const navigate = useNavigate();
@@ -50,6 +51,7 @@ export const OrderTrackPage: React.FC = () => {
   }, [urlOrderId, tableOrders]);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState<boolean>(false);
+  const [dishToRate, setDishToRate] = useState<MenuItem | null>(null);
   const autoPromptRef = React.useRef<Set<string>>(new Set());
 
   const activeOrder = useMemo(() => {
@@ -293,31 +295,48 @@ export const OrderTrackPage: React.FC = () => {
               </h3>
 
               <div className="divide-y divide-[#FAF8F3]">
-                {activeOrder.items.map((item) => (
-                  <div key={item.id} className="py-2.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-md bg-[#FAF8F3] text-[#173F35] font-bold flex items-center justify-center text-[11px]">
-                        {item.quantity}x
-                      </span>
-                      <div>
-                        <span className="font-semibold text-[#202622] block">{item.item_name}</span>
-                        {item.item_note && (
-                          <span className="text-[11px] text-amber-700 italic">
-                            "{item.item_note}"
-                          </span>
-                        )}
+                {activeOrder.items.map((item) => {
+                  const matchedDish = menuItems.find((m) => m.id === item.menu_item_id);
+                  const dRating = getDishRating(item.menu_item_id);
+                  return (
+                    <div key={item.id} className="py-3 flex items-start justify-between gap-2 text-xs">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span className="w-6 h-6 rounded-md bg-[#FAF8F3] text-[#173F35] font-bold flex items-center justify-center text-[11px] shrink-0 mt-0.5 tabular-nums">
+                          {item.quantity}x
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-semibold text-[#202622] block">{item.item_name}</span>
+                          {item.item_note && (
+                            <span className="text-[11px] text-amber-800 block mt-0.5">
+                              Talabnoma: <span className="italic">"{item.item_note}"</span>
+                            </span>
+                          )}
+                          {matchedDish && (
+                            <button
+                              type="button"
+                              onClick={() => setDishToRate(matchedDish)}
+                              className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#173F35] hover:underline"
+                            >
+                              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              <span>
+                                Taomni baholash
+                                {dRating.count > 0 ? ` (${dRating.average.toFixed(1)} ★)` : ''}
+                              </span>
+                            </button>
+                          )}
+                        </div>
                       </div>
+                      <span className="font-bold text-[#173F35] tabular-nums shrink-0">
+                        {formatUZS(item.line_total)}
+                      </span>
                     </div>
-                    <span className="font-bold text-[#173F35] tabular-nums">
-                      {formatUZS(item.line_total)}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {activeOrder.customer_note && (
                 <div className="mt-4 p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-xs text-amber-900">
-                  <span className="font-semibold block mb-0.5">Mijoz istagi:</span>
+                  <span className="font-semibold block mb-0.5">Umumiy talabnoma / izoh:</span>
                   <p className="italic">"{activeOrder.customer_note}"</p>
                 </div>
               )}
@@ -368,7 +387,7 @@ export const OrderTrackPage: React.FC = () => {
               Stol №{activeTableNumber} uchun hozircha hech qanday buyurtma berilmagan.
             </p>
             <button
-              onClick={() => navigate('/menu')}
+              onClick={() => navigate(`/t/${activeTableNumber}`)}
               className="py-3 px-6 rounded-xl bg-[#173F35] text-white text-xs font-bold hover:bg-[#235B4E] transition-all shadow-sm"
             >
               Menyuni ko'rish
@@ -376,6 +395,22 @@ export const OrderTrackPage: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Rate individual ordered dish */}
+      <DishDetailModal
+        dish={dishToRate}
+        initialTab="reviews"
+        onClose={() => setDishToRate(null)}
+      />
+
+      {/* Overall Order Feedback Modal */}
+      {activeOrder && (
+        <CustomerFeedbackModal
+          order={activeOrder}
+          isOpen={isFeedbackModalOpen}
+          onClose={() => setIsFeedbackModalOpen(false)}
+        />
+      )}
 
       <CustomerBottomNav />
     </div>
