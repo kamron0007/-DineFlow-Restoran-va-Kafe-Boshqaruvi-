@@ -1,0 +1,227 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "Customer table order synced in real time between customer phones, waiter terminals, kitchen KDS, and admin dashboards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "order_number": { "type": "string", "maxLength": 32 },
+        "table_id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "table_number": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": ["new", "preparing", "ready", "delivered", "cancelled"]
+        },
+        "total_amount": { "type": "number" },
+        "customer_note": { "type": "string", "maxLength": 300 },
+        "waiter_called": { "type": "boolean" },
+        "bill_requested": { "type": "boolean" },
+        "waiter_name": { "type": "string", "maxLength": 100 },
+        "rating": { "type": "number" },
+        "items": { "type": "array" },
+        "created_at": { "type": "string", "maxLength": 40 },
+        "updated_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "order_number",
+        "table_id",
+        "table_number",
+        "status",
+        "total_amount",
+        "items",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "ServiceCall": {
+      "title": "ServiceCall",
+      "description": "Real-time waiter call, bill request, or water request sent from a customer table QR screen to waiter and admin screens.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "table_id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "table_number": { "type": "number" },
+        "type": { "type": "string", "enum": ["waiter", "bill", "water"] },
+        "note": { "type": "string", "maxLength": 250 },
+        "call_count": { "type": "number" },
+        "escalated_to_admin": { "type": "boolean" },
+        "assigned_waiter_name": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["pending", "resolved"] },
+        "created_at": { "type": "string", "maxLength": 40 },
+        "last_called_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "table_id",
+        "table_number",
+        "type",
+        "status",
+        "created_at"
+      ]
+    },
+    "DishReview": {
+      "title": "DishReview",
+      "description": "Star rating (1-5) and comment left by a customer for a specific menu dish.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "menu_item_id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dish_name": { "type": "string", "maxLength": 120 },
+        "table_number": { "type": "number" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "maxLength": 400 },
+        "customer_name": { "type": "string", "maxLength": 60 },
+        "created_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "menu_item_id",
+        "dish_name",
+        "table_number",
+        "rating",
+        "comment",
+        "created_at"
+      ]
+    },
+    "CustomerFeedback": {
+      "title": "CustomerFeedback",
+      "description": "Overall service and dining feedback for an order (non-PII fields only).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "order_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "order_number": { "type": "string", "maxLength": 32 },
+        "table_number": { "type": "number" },
+        "waiter_name": { "type": "string", "maxLength": 100 },
+        "overall_rating": { "type": "number" },
+        "food_rating": { "type": "number" },
+        "speed_rating": { "type": "number" },
+        "waiter_rating": { "type": "number" },
+        "atmosphere_rating": { "type": "number" },
+        "tags": { "type": "array" },
+        "comment": { "type": "string", "maxLength": 500 },
+        "customer_name": { "type": "string", "maxLength": 60 },
+        "tip_amount": { "type": "number" },
+        "created_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "order_id",
+        "order_number",
+        "table_number",
+        "overall_rating",
+        "tags",
+        "comment",
+        "created_at"
+      ]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Restaurant menu dish item synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category_id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "price": { "type": "number" },
+        "image_url": { "type": "string", "maxLength": 500 },
+        "is_available": { "type": "boolean" },
+        "preparation_time_minutes": { "type": "number" },
+        "calories": { "type": "number" },
+        "weight_or_portion": { "type": "string", "maxLength": 60 },
+        "tags": { "type": "array" },
+        "tier": { "type": "string", "enum": ["oddiy", "biznes", "vip"] },
+        "created_at": { "type": "string", "maxLength": 40 },
+        "updated_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "category_id",
+        "name",
+        "description",
+        "price",
+        "image_url",
+        "is_available",
+        "preparation_time_minutes",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Menu category definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 40 },
+        "image_url": { "type": "string", "maxLength": 500 },
+        "sort_order": { "type": "number" },
+        "created_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "name", "sort_order", "created_at"]
+    },
+    "RestaurantTable": {
+      "title": "RestaurantTable",
+      "description": "Restaurant dining table configuration and QR token.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "table_number": { "type": "number" },
+        "label": { "type": "string", "maxLength": 80 },
+        "zone": {
+          "type": "string",
+          "enum": ["oddiy", "biznes", "vip", "standard", "business", "main", "terrace"]
+        },
+        "tier": { "type": "string", "enum": ["oddiy", "biznes", "vip"] },
+        "seats": { "type": "number" },
+        "qr_token": { "type": "string", "maxLength": 80 },
+        "is_active": { "type": "boolean" },
+        "assigned_waiter_name": { "type": "string", "maxLength": 100 },
+        "created_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "table_number",
+        "zone",
+        "seats",
+        "qr_token",
+        "is_active",
+        "created_at"
+      ]
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Real-time table orders shared across customer phones, waiters, kitchen, and admin."
+    },
+    "/service_calls/{callId}": {
+      "schema": { "$ref": "#/entities/ServiceCall" },
+      "description": "Real-time waiter calls and bill requests from customer tables."
+    },
+    "/dish_reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/DishReview" },
+      "description": "Customer 1-5 star ratings and comments per dish."
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": { "$ref": "#/entities/CustomerFeedback" },
+      "description": "Overall post-order dining feedbacks (strictly non-PII)."
+    },
+    "/menu_items/{itemId}": {
+      "schema": { "$ref": "#/entities/MenuItem" },
+      "description": "Live restaurant menu catalog."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Menu categories."
+    },
+    "/tables/{tableId}": {
+      "schema": { "$ref": "#/entities/RestaurantTable" },
+      "description": "Restaurant table registry."
+    }
+  }
+}

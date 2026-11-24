@@ -57,7 +57,11 @@ export const TableManagementPage: React.FC = () => {
 
   useEffect(() => {
     fetch('/api/network-info')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) =>
+        res.ok && (res.headers.get('content-type') || '').includes('application/json')
+          ? res.json()
+          : null
+      )
       .then((data) => {
         if (data?.lanUrl) {
           setDetectedLanUrl(data.lanUrl);
@@ -66,27 +70,40 @@ export const TableManagementPage: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  const isClosedPreviewHost = (urlOrHost: string) =>
+    urlOrHost.includes('ais-dev-') || urlOrHost.includes('ais-pre-');
+
+  const isLocalHost = (urlOrHost: string) =>
+    urlOrHost.includes('localhost') || urlOrHost.includes('127.0.0.1');
+
   const isLocalhostOrigin =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    typeof window !== 'undefined' && isLocalHost(window.location.hostname);
 
   const isPrivateDevPreview =
-    typeof window !== 'undefined' && window.location.hostname.startsWith('ais-dev-');
+    typeof window !== 'undefined' && isClosedPreviewHost(window.location.hostname);
+
+  const isCurrentOriginPublic =
+    typeof window !== 'undefined' &&
+    window.location.origin.startsWith('https://') &&
+    !isLocalhostOrigin &&
+    !isPrivateDevPreview;
 
   const effectiveQrBaseUrl = useMemo(() => {
     const trimmed = customQrBaseUrl.trim().replace(/\/+$/, '');
-    if (trimmed) return trimmed;
+    // If deployed on a real public domain (e.g. *.vercel.app), never let a stale localhost/preview override break QR links
+    if (trimmed && (!isCurrentOriginPublic || (!isClosedPreviewHost(trimmed) && !isLocalHost(trimmed)))) {
+      return trimmed;
+    }
     if (isLocalhostOrigin && detectedLanUrl) return detectedLanUrl;
     if (typeof window !== 'undefined') return window.location.origin;
     return '';
-  }, [customQrBaseUrl, isLocalhostOrigin, detectedLanUrl]);
+  }, [customQrBaseUrl, isLocalhostOrigin, detectedLanUrl, isCurrentOriginPublic]);
 
   const isPublicHttpsQr = useMemo(() => {
     return (
       effectiveQrBaseUrl.startsWith('https://') &&
-      !effectiveQrBaseUrl.includes('localhost') &&
-      !effectiveQrBaseUrl.includes('127.0.0.1') &&
-      !effectiveQrBaseUrl.includes('ais-dev-')
+      !isLocalHost(effectiveQrBaseUrl) &&
+      !isClosedPreviewHost(effectiveQrBaseUrl)
     );
   }, [effectiveQrBaseUrl]);
 
@@ -782,7 +799,7 @@ export const TableManagementPage: React.FC = () => {
                             type="text"
                             value={qrUrlInput}
                             onChange={(e) => setQrUrlInput(e.target.value)}
-                            placeholder="https://sizning-saytingiz.run.app"
+                            placeholder="https://sizning-saytingiz.vercel.app"
                             className="w-full px-2.5 py-2 rounded-lg border border-[#E5E0D8] text-xs font-mono text-[#202622] focus:outline-none focus:border-[#173F35]"
                           />
                           {detectedLanUrl && (
@@ -814,13 +831,13 @@ export const TableManagementPage: React.FC = () => {
                       ) : !isPublicHttpsQr ? (
                         <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300/80 space-y-1.5">
                           <p className="text-[11px] text-amber-950 leading-snug">
-                            {effectiveQrBaseUrl.includes('localhost') || effectiveQrBaseUrl.includes('127.0.0.1') ? (
+                            {isLocalHost(effectiveQrBaseUrl) ? (
                               <span>
-                                <strong>Diqqat:</strong> localhost telefondan ochilmaydi. Ochiq (Publish) domenni kiriting.
+                                <strong>Diqqat:</strong> localhost telefondan ochilmaydi. Vercel yoki ochiq domeningizni kiriting.
                               </span>
-                            ) : isPrivateDevPreview && !customQrBaseUrl ? (
+                            ) : isClosedPreviewHost(effectiveQrBaseUrl) ? (
                               <span>
-                                <strong>Yopiq dev havola:</strong> Istalgan telefondan skanerlash uchun Publish qilingan ochiq domenni kiriting.
+                                <strong>Yopiq preview havola:</strong> Boshqa telefonlardan kirish uchun <strong>vercel.app</strong> (ochiq domen) manzilingizni kiriting.
                               </span>
                             ) : (
                               <span>

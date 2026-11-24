@@ -1,0 +1,342 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Reusable Security Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'boymurodovkamronbek474@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || (data[field] is bool);
+    }
+
+    function isOptionalNumberRange(data, field, minVal, maxVal) {
+      return !(field in data) || (data[field] is number && data[field] >= minVal && data[field] <= maxVal);
+    }
+
+    // --- Validation Blueprints (Anti-Update-Gap) ---
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'id', 'order_number', 'table_id', 'table_number', 'status',
+          'total_amount', 'items', 'created_at', 'updated_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'order_number', 'table_id', 'table_number', 'status',
+          'total_amount', 'customer_note', 'waiter_called', 'bill_requested',
+          'waiter_name', 'rating', 'items', 'created_at', 'updated_at',
+          'server_created_at', 'server_updated_at'
+        ])
+        && isValidId(data.id)
+        && data.order_number is string && data.order_number.size() >= 1 && data.order_number.size() <= 32
+        && isValidId(data.table_id)
+        && data.table_number is number && data.table_number >= 1 && data.table_number <= 200
+        && data.status is string && data.status in ['new', 'preparing', 'ready', 'delivered', 'cancelled']
+        && data.total_amount is number && data.total_amount >= 0 && data.total_amount <= 100000000
+        && isOptionalString(data, 'customer_note', 300)
+        && isOptionalBool(data, 'waiter_called')
+        && isOptionalBool(data, 'bill_requested')
+        && isOptionalString(data, 'waiter_name', 100)
+        && isOptionalNumberRange(data, 'rating', 1, 5)
+        && data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40
+        && data.updated_at is string && data.updated_at.size() >= 10 && data.updated_at.size() <= 40;
+    }
+
+    function isValidServiceCall(data) {
+      return data.keys().hasAll([
+          'id', 'table_id', 'table_number', 'type', 'status', 'created_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'table_id', 'table_number', 'type', 'note', 'call_count',
+          'escalated_to_admin', 'assigned_waiter_name', 'status',
+          'created_at', 'last_called_at', 'server_created_at', 'server_updated_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.table_id)
+        && data.table_number is number && data.table_number >= 1 && data.table_number <= 200
+        && data.type is string && data.type in ['waiter', 'bill', 'water']
+        && isOptionalString(data, 'note', 250)
+        && isOptionalNumberRange(data, 'call_count', 1, 20)
+        && isOptionalBool(data, 'escalated_to_admin')
+        && isOptionalString(data, 'assigned_waiter_name', 100)
+        && data.status is string && data.status in ['pending', 'resolved']
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40
+        && isOptionalString(data, 'last_called_at', 40);
+    }
+
+    function isValidDishReview(data) {
+      return data.keys().hasAll([
+          'id', 'menu_item_id', 'dish_name', 'table_number', 'rating', 'comment', 'created_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'menu_item_id', 'dish_name', 'table_number', 'rating', 'comment',
+          'customer_name', 'created_at', 'server_created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.menu_item_id)
+        && data.dish_name is string && data.dish_name.size() >= 1 && data.dish_name.size() <= 120
+        && data.table_number is number && data.table_number >= 1 && data.table_number <= 200
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() <= 400
+        && isOptionalString(data, 'customer_name', 60)
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40;
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll([
+          'id', 'order_id', 'order_number', 'table_number', 'overall_rating',
+          'tags', 'comment', 'created_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'order_id', 'order_number', 'table_number', 'waiter_name',
+          'overall_rating', 'food_rating', 'speed_rating', 'waiter_rating',
+          'atmosphere_rating', 'tags', 'comment', 'customer_name',
+          'tip_amount', 'created_at', 'server_created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.order_id)
+        && data.order_number is string && data.order_number.size() <= 32
+        && data.table_number is number && data.table_number >= 1 && data.table_number <= 200
+        && isOptionalString(data, 'waiter_name', 100)
+        && data.overall_rating is number && data.overall_rating >= 1 && data.overall_rating <= 5
+        && isOptionalNumberRange(data, 'food_rating', 1, 5)
+        && isOptionalNumberRange(data, 'speed_rating', 1, 5)
+        && isOptionalNumberRange(data, 'waiter_rating', 1, 5)
+        && isOptionalNumberRange(data, 'atmosphere_rating', 1, 5)
+        && data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string)
+        && data.comment is string && data.comment.size() <= 500
+        && isOptionalString(data, 'customer_name', 60)
+        && isOptionalNumberRange(data, 'tip_amount', 0, 10000000)
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll([
+          'id', 'category_id', 'name', 'description', 'price', 'image_url',
+          'is_available', 'preparation_time_minutes', 'created_at', 'updated_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'category_id', 'name', 'description', 'price', 'image_url',
+          'is_available', 'preparation_time_minutes', 'calories',
+          'weight_or_portion', 'tags', 'tier', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.category_id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.description is string && data.description.size() <= 500
+        && data.price is number && data.price >= 0 && data.price <= 50000000
+        && data.image_url is string && data.image_url.size() <= 500
+        && data.is_available is bool
+        && data.preparation_time_minutes is number && data.preparation_time_minutes >= 0 && data.preparation_time_minutes <= 240
+        && isOptionalNumberRange(data, 'calories', 0, 20000)
+        && isOptionalString(data, 'weight_or_portion', 60)
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string)))
+        && (!('tier' in data) || (data.tier is string && data.tier in ['oddiy', 'biznes', 'vip']))
+        && data.created_at is string && data.created_at.size() <= 40
+        && data.updated_at is string && data.updated_at.size() <= 40;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'sort_order', 'created_at'])
+        && data.keys().hasOnly(['id', 'name', 'icon', 'image_url', 'sort_order', 'created_at'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && isOptionalString(data, 'icon', 40)
+        && isOptionalString(data, 'image_url', 500)
+        && data.sort_order is number && data.sort_order >= 0 && data.sort_order <= 500
+        && data.created_at is string && data.created_at.size() <= 40;
+    }
+
+    function isValidTable(data) {
+      return data.keys().hasAll(['id', 'table_number', 'zone', 'seats', 'qr_token', 'is_active', 'created_at'])
+        && data.keys().hasOnly([
+          'id', 'table_number', 'label', 'zone', 'tier', 'seats',
+          'qr_token', 'is_active', 'assigned_waiter_name', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.table_number is number && data.table_number >= 1 && data.table_number <= 200
+        && isOptionalString(data, 'label', 80)
+        && data.zone is string && data.zone in ['oddiy', 'biznes', 'vip', 'standard', 'business', 'main', 'terrace']
+        && (!('tier' in data) || (data.tier is string && data.tier in ['oddiy', 'biznes', 'vip']))
+        && data.seats is number && data.seats >= 1 && data.seats <= 50
+        && data.qr_token is string && data.qr_token.size() >= 1 && data.qr_token.size() <= 80
+        && data.is_active is bool
+        && isOptionalString(data, 'assigned_waiter_name', 100)
+        && data.created_at is string && data.created_at.size() <= 40;
+    }
+
+    // --- Startup Connection Health Check ---
+    match /test/connection {
+      allow get: if true;
+      allow write: if false;
+    }
+
+    // --- Admin Registry (Admin Only) ---
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && request.auth.uid == adminUid;
+      allow list, write: if isAdmin();
+    }
+
+    // --- Real-Time Table Orders ---
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId);
+      allow list: if resource.data.table_number >= 1 && resource.data.table_number <= 200;
+
+      allow create: if isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().id == orderId
+        && incoming().status == 'new'
+        && (!('server_created_at' in incoming()) || incoming().server_created_at == request.time)
+        && (!('server_updated_at' in incoming()) || incoming().server_updated_at == request.time);
+
+      allow update: if isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().id == existing().id
+        && incoming().order_number == existing().order_number
+        && incoming().table_number == existing().table_number
+        && incoming().total_amount == existing().total_amount
+        && incoming().created_at == existing().created_at
+        && (
+          isAdmin()
+          || (
+            existing().status != 'delivered'
+            && existing().status != 'cancelled'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'waiter_called', 'bill_requested', 'updated_at', 'server_updated_at'
+            ])
+          )
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'rating', 'updated_at', 'server_updated_at'
+            ])
+          )
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // --- Real-Time Service Calls (Waiter / Bill / Water) ---
+    match /service_calls/{callId} {
+      allow get: if isValidId(callId);
+      allow list: if resource.data.table_number >= 1 && resource.data.table_number <= 200;
+
+      allow create: if isValidId(callId)
+        && isValidServiceCall(incoming())
+        && incoming().id == callId
+        && incoming().status == 'pending'
+        && (!('server_created_at' in incoming()) || incoming().server_created_at == request.time)
+        && (!('server_updated_at' in incoming()) || incoming().server_updated_at == request.time);
+
+      allow update: if isValidId(callId)
+        && isValidServiceCall(incoming())
+        && incoming().id == existing().id
+        && incoming().table_number == existing().table_number
+        && incoming().created_at == existing().created_at
+        && (
+          isAdmin()
+          || (
+            existing().status == 'pending'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'call_count', 'escalated_to_admin', 'note',
+              'last_called_at', 'type', 'assigned_waiter_name', 'server_updated_at'
+            ])
+          )
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // --- Dish Reviews (1-5 Stars + Comment) ---
+    match /dish_reviews/{reviewId} {
+      allow get: if isValidId(reviewId);
+      allow list: if resource.data.rating >= 1 && resource.data.rating <= 5;
+
+      allow create: if isValidId(reviewId)
+        && isValidDishReview(incoming())
+        && incoming().id == reviewId
+        && (!('server_created_at' in incoming()) || incoming().server_created_at == request.time);
+
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Post-Order Service Feedbacks (Zero PII) ---
+    match /feedbacks/{feedbackId} {
+      allow get: if isValidId(feedbackId);
+      allow list: if resource.data.overall_rating >= 1 && resource.data.overall_rating <= 5;
+
+      allow create: if isValidId(feedbackId)
+        && isValidFeedback(incoming())
+        && incoming().id == feedbackId
+        && (!('server_created_at' in incoming()) || incoming().server_created_at == request.time);
+
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Live Menu Items ---
+    match /menu_items/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if resource.data.price >= 0;
+
+      allow create: if isValidId(itemId) && isValidMenuItem(incoming()) && incoming().id == itemId;
+      allow update: if isValidId(itemId)
+        && isValidMenuItem(incoming())
+        && incoming().id == existing().id
+        && incoming().created_at == existing().created_at;
+      allow delete: if isValidId(itemId);
+    }
+
+    // --- Menu Categories ---
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if resource.data.sort_order >= 0;
+
+      allow create: if isValidId(categoryId) && isValidCategory(incoming()) && incoming().id == categoryId;
+      allow update: if isValidId(categoryId)
+        && isValidCategory(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isValidId(categoryId);
+    }
+
+    // --- Restaurant Tables ---
+    match /tables/{tableId} {
+      allow get: if isValidId(tableId);
+      allow list: if resource.data.table_number >= 1 && resource.data.table_number <= 200;
+
+      allow create: if isValidId(tableId) && isValidTable(incoming()) && incoming().id == tableId;
+      allow update: if isValidId(tableId)
+        && isValidTable(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isValidId(tableId);
+    }
+  }
+}
