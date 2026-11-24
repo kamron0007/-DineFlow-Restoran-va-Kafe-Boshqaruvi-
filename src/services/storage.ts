@@ -72,21 +72,37 @@ export const emitRealtimeEvent = (type: 'orders' | 'tables' | 'menu' | 'service'
   }
 };
 
-const isJsonResponse = (res: Response): boolean =>
-  res.ok && (res.headers.get('content-type') || '').includes('application/json');
-
 class DataService {
   private isDemo: boolean;
   private realtimeInitialized = false;
+  private isSyncingOrders = false;
+  private lastSyncAt = 0;
+  private recentMutations = new Map<string, number>();
 
   constructor() {
     this.isDemo = !isSupabaseConfigured();
     this.ensureInitialized();
     this.initSupabaseRealtime();
+    if (typeof window !== 'undefined') {
+      this.syncOrdersFromSupabase(false, true);
+    }
   }
 
   public getIsDemo(): boolean {
     return this.isDemo;
+  }
+
+  private markMutated(orderId: string) {
+    this.recentMutations.set(orderId, Date.now());
+  }
+
+  private wasRecentlyMutated(orderId?: string): boolean {
+    if (!orderId) return false;
+    const ts = this.recentMutations.get(orderId);
+    if (!ts) return false;
+    if (Date.now() - ts < 4000) return true;
+    this.recentMutations.delete(orderId);
+    return false;
   }
 
   private initSupabaseRealtime() {
@@ -100,15 +116,17 @@ class DataService {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
-        async (payload) => {
-          await this.syncOrdersFromSupabase(payload.eventType === 'INSERT');
+        (payload: any) => {
+          const changedId = payload?.new?.id || payload?.old?.id;
+          const isRemoteInsert = payload.eventType === 'INSERT' && !this.wasRecentlyMutated(changedId);
+          this.syncOrdersFromSupabase(isRemoteInsert, true);
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'order_items' },
-        async () => {
-          await this.syncOrdersFromSupabase(false);
+        { event: 'INSERT', schema: 'public', table: 'order_items' },
+        () => {
+          this.syncOrdersFromSupabase(false, true);
         }
       )
       .subscribe();
@@ -153,43 +171,61 @@ class DataService {
     };
   }
 
-  private async syncOrdersFromSupabase(isNewInsert = false): Promise<Order[] | null> {
-    if (!isSupabaseConfigured() || !supabase) return null;
+  private async syncOrdersFromSupabase(isRemoteInsert = false, force = false): Promise<void> {
+    if (!isSupabaseConfigured() || !supabase || this.isSyncingOrders) return;
+    if (!force && Date.now() - this.lastSyncAt < 2500) return;
+
+    this.isSyncingOrders = true;
+    this.lastSyncAt = Date.now();
 
     try {
       const { data, error } = await supabase
         .from('orders')
         .select('*, order_items(*)')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(60);
 
       if (error) {
-        console.warn('Supabase getOrders error:', error.message);
-        return null;
+        console.warn('Supabase sync error:', error.message);
+        return;
       }
 
       const remoteOrders = (data || []).map((row) => this.mapSupabaseOrder(row));
       const rawLocal = localStorage.getItem(STORAGE_KEYS.ORDERS);
       const localOrders: Order[] = rawLocal ? JSON.parse(rawLocal) : [];
 
-      const remoteIds = new Set(remoteOrders.map((o) => o.id));
-      const localOnly = localOrders.filter((o) => !remoteIds.has(o.id));
-      const merged = [...remoteOrders, ...localOnly].sort(
+      const remoteMap = new Map(remoteOrders.map((o) => [o.id, o]));
+      // Keep recent local mutations intact if server hasn't caught up yet
+      const mergedRemote = remoteOrders.map((ro) => {
+        if (this.wasRecentlyMutated(ro.id)) {
+          const localMatch = localOrders.find((lo) => lo.id === ro.id);
+          return localMatch || ro;
+        }
+        return ro;
+      });
+
+      const localOnly = localOrders.filter((o) => !remoteMap.has(o.id));
+      const merged = [...mergedRemote, ...localOnly].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
+      const prevFingerprint = localOrders.map((o) => `${o.id}:${o.status}:${o.items?.length || 0}`).join('|');
+      const nextFingerprint = merged.map((o) => `${o.id}:${o.status}:${o.items?.length || 0}`).join('|');
+
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(merged));
 
-      if (isNewInsert) {
-        soundService.playTick();
+      if (prevFingerprint !== nextFingerprint) {
+        if (isRemoteInsert) {
+          soundService.playTick();
+        }
+        emitRealtimeEvent('orders', {
+          action: isRemoteInsert ? 'order_created' : 'order_status_changed',
+        });
       }
-      emitRealtimeEvent('orders', {
-        action: isNewInsert ? 'order_created' : 'order_status_changed',
-      });
-
-      return merged;
     } catch (e) {
       console.warn('Supabase syncOrders exception:', e);
-      return null;
+    } finally {
+      this.isSyncingOrders = false;
     }
   }
 
@@ -241,7 +277,7 @@ class DataService {
     if (existingOrders) {
       try {
         const parsed = JSON.parse(existingOrders);
-        if (!Array.isArray(parsed) || parsed.length < 20) {
+        if (!Array.isArray(parsed)) {
           shouldSeedOrders = true;
         }
       } catch {
@@ -253,20 +289,7 @@ class DataService {
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.SERVICE_CALLS)) {
-      localStorage.setItem(
-        STORAGE_KEYS.SERVICE_CALLS,
-        JSON.stringify([
-          {
-            id: 'call-1',
-            table_id: 'table-14',
-            table_number: 14,
-            type: 'waiter',
-            note: "Iltimos, qo'shimcha choynak va stakan olib keling",
-            created_at: new Date(Date.now() - 2 * 60000).toISOString(),
-            status: 'pending',
-          },
-        ])
-      );
+      localStorage.setItem(STORAGE_KEYS.SERVICE_CALLS, JSON.stringify([]));
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.WAITERS)) {
@@ -281,54 +304,30 @@ class DataService {
   // --- CATEGORIES ---
   public async getCategories(): Promise<Category[]> {
     const raw = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
-    const localData: Category[] = raw ? JSON.parse(raw) : INITIAL_CATEGORIES;
-
-    if (isSupabaseConfigured() && supabase) {
-      supabase
-        .from('categories')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .then(({ data }) => {
-          if (Array.isArray(data) && data.length > 0) {
-            localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(data));
-          }
-        });
-    }
-
-    return localData;
+    return raw ? JSON.parse(raw) : INITIAL_CATEGORIES;
   }
 
   public async saveCategory(category: Category): Promise<Category> {
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { data, error } = await supabase.from('categories').upsert(category).select().single();
-        if (!error && data) {
-          emitRealtimeEvent('menu');
-          return data as Category;
-        }
-      } catch (e) {
-        console.warn('Supabase saveCategory error:', e);
-      }
-    }
     const current = await this.getCategories();
     const idx = current.findIndex((c) => c.id === category.id);
     const updated = idx >= 0 ? current.map((c, i) => (i === idx ? category : c)) : [...current, category];
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(updated));
     emitRealtimeEvent('menu');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('categories').upsert(category).then(() => {});
+    }
     return category;
   }
 
   public async deleteCategory(id: string): Promise<void> {
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('categories').delete().eq('id', id);
-      } catch (e) {
-        console.warn('Supabase deleteCategory error:', e);
-      }
-    }
     const current = await this.getCategories();
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(current.filter((c) => c.id !== id)));
     emitRealtimeEvent('menu');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('categories').delete().eq('id', id).then(() => {});
+    }
   }
 
   // --- MENU ITEMS ---
@@ -343,36 +342,26 @@ class DataService {
       item.id = 'dish-' + Date.now();
       item.created_at = new Date().toISOString();
     }
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { data, error } = await supabase.from('menu_items').upsert(item).select().single();
-        if (!error && data) {
-          emitRealtimeEvent('menu');
-          return data as MenuItem;
-        }
-      } catch (e) {
-        console.warn('Supabase saveMenuItem error:', e);
-      }
-    }
     const current = await this.getMenuItems();
     const idx = current.findIndex((m) => m.id === item.id);
     const updated = idx >= 0 ? current.map((m, i) => (i === idx ? item : m)) : [item, ...current];
     localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(updated));
     emitRealtimeEvent('menu');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('menu_items').upsert(item).then(() => {});
+    }
     return item;
   }
 
   public async deleteMenuItem(id: string): Promise<void> {
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('menu_items').delete().eq('id', id);
-      } catch (e) {
-        console.warn('Supabase deleteMenuItem error:', e);
-      }
-    }
     const current = await this.getMenuItems();
     localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(current.filter((m) => m.id !== id)));
     emitRealtimeEvent('menu');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('menu_items').delete().eq('id', id).then(() => {});
+    }
   }
 
   public async toggleDishAvailability(id: string, isAvailable: boolean): Promise<void> {
@@ -396,17 +385,6 @@ class DataService {
       table.created_at = new Date().toISOString();
       table.qr_token = `qr-${table.table_number}-${Math.random().toString(36).substring(2, 8)}`;
     }
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { data, error } = await supabase.from('restaurant_tables').upsert(table).select().single();
-        if (!error && data) {
-          emitRealtimeEvent('tables');
-          return data as RestaurantTable;
-        }
-      } catch (e) {
-        console.warn('Supabase saveTable error:', e);
-      }
-    }
     const current = await this.getTables();
     const idx = current.findIndex((t) => t.id === table.id);
     const updated =
@@ -415,31 +393,32 @@ class DataService {
         : [...current, table].sort((a, b) => a.table_number - b.table_number);
     localStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(updated));
     emitRealtimeEvent('tables');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('restaurant_tables').upsert(table).then(() => {});
+    }
     return table;
   }
 
   public async deleteTable(id: string): Promise<void> {
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('restaurant_tables').delete().eq('id', id);
-      } catch (e) {
-        console.warn('Supabase deleteTable error:', e);
-      }
-    }
     const current = await this.getTables();
     localStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(current.filter((t) => t.id !== id)));
     emitRealtimeEvent('tables');
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase.from('restaurant_tables').delete().eq('id', id).then(() => {});
+    }
   }
 
-  // --- ORDERS (SUPABASE + REALTIME + LOCAL CACHE) ---
+  // --- ORDERS (INSTANT LOCAL READ + BACKGROUND SUPABASE SYNC) ---
   public async getOrders(): Promise<Order[]> {
-    if (isSupabaseConfigured() && supabase) {
-      const synced = await this.syncOrdersFromSupabase(false);
-      if (synced) return synced;
-    }
-
     const raw = localStorage.getItem(STORAGE_KEYS.ORDERS);
-    return raw ? JSON.parse(raw) : INITIAL_ORDERS;
+    const localOrders: Order[] = raw ? JSON.parse(raw) : INITIAL_ORDERS;
+
+    // Trigger throttled background sync without blocking UI
+    this.syncOrdersFromSupabase(false, false);
+
+    return localOrders;
   }
 
   public async createOrder(params: {
@@ -464,6 +443,7 @@ class DataService {
     let calculatedTotal = 0;
     const orderId = 'order-' + Date.now();
     const orderNumber = generateOrderNumber();
+    const now = new Date().toISOString();
 
     const orderItems: OrderItem[] = cartItems.map((cart, idx) => {
       const liveDish = dishMap.get(cart.menuItem.id) || cart.menuItem;
@@ -493,64 +473,15 @@ class DataService {
       customer_note: customerNote || '',
       waiter_name: table.assigned_waiter_name || "Mas'ul ofitsiant",
       items: orderItems,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     };
 
+    this.markMutated(orderId);
     const rawOrders = localStorage.getItem(STORAGE_KEYS.ORDERS);
     const currentOrders: Order[] = rawOrders ? JSON.parse(rawOrders) : INITIAL_ORDERS;
     const updatedOrders = [newOrder, ...currentOrders.filter((o) => o.id !== newOrder.id)];
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(updatedOrders));
-
-    // Write directly to Supabase
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('restaurant_tables').upsert(
-          {
-            id: table.id,
-            table_number: table.table_number,
-          },
-          { onConflict: 'id', ignoreDuplicates: true }
-        );
-
-        const { error: orderError } = await supabase.from('orders').insert({
-          id: newOrder.id,
-          order_number: newOrder.order_number,
-          table_id: newOrder.table_id,
-          table_number: newOrder.table_number,
-          status: newOrder.status,
-          total_amount: newOrder.total_amount,
-          customer_note: newOrder.customer_note,
-          waiter_name: newOrder.waiter_name,
-          waiter_called: false,
-          bill_requested: false,
-          created_at: newOrder.created_at,
-          updated_at: newOrder.updated_at,
-        });
-
-        if (orderError) {
-          console.error('Supabase order insert error:', orderError.message);
-        } else if (orderItems.length > 0) {
-          const { error: itemsError } = await supabase.from('order_items').insert(
-            orderItems.map((it) => ({
-              id: it.id,
-              order_id: it.order_id,
-              menu_item_id: it.menu_item_id,
-              item_name: it.item_name,
-              unit_price: it.unit_price,
-              quantity: it.quantity,
-              item_note: it.item_note,
-              line_total: it.line_total,
-            }))
-          );
-          if (itemsError) {
-            console.error('Supabase order_items insert error:', itemsError.message);
-          }
-        }
-      } catch (e) {
-        console.error('Supabase createOrder exception:', e);
-      }
-    }
 
     soundService.playTick();
     emitRealtimeEvent('orders', {
@@ -562,10 +493,59 @@ class DataService {
       itemsCount: newOrder.items.length,
     });
 
+    // Non-blocking background write to Supabase
+    if (isSupabaseConfigured() && supabase) {
+      const orderPayload = {
+        id: newOrder.id,
+        order_number: newOrder.order_number,
+        table_id: newOrder.table_id,
+        table_number: newOrder.table_number,
+        status: newOrder.status,
+        total_amount: newOrder.total_amount,
+        customer_note: newOrder.customer_note,
+        waiter_name: newOrder.waiter_name,
+        waiter_called: false,
+        bill_requested: false,
+        created_at: newOrder.created_at,
+        updated_at: newOrder.updated_at,
+      };
+
+      const itemsPayload = orderItems.map((it) => ({
+        id: it.id,
+        order_id: it.order_id,
+        menu_item_id: it.menu_item_id,
+        item_name: it.item_name,
+        unit_price: it.unit_price,
+        quantity: it.quantity,
+        item_note: it.item_note,
+        line_total: it.line_total,
+      }));
+
+      (async () => {
+        try {
+          let { error: orderError } = await supabase!.from('orders').insert(orderPayload);
+          if (orderError && orderError.code === '23503') {
+            await supabase!.from('restaurant_tables').upsert(
+              { id: table.id, table_number: table.table_number },
+              { onConflict: 'id', ignoreDuplicates: true }
+            );
+            const retry = await supabase!.from('orders').insert(orderPayload);
+            orderError = retry.error;
+          }
+          if (!orderError && itemsPayload.length > 0) {
+            await supabase!.from('order_items').insert(itemsPayload);
+          }
+        } catch (e) {
+          console.error('Supabase background createOrder error:', e);
+        }
+      })();
+    }
+
     return newOrder;
   }
 
   public async updateOrderStatus(orderId: string, newStatus: OrderStatus): Promise<Order | null> {
+    this.markMutated(orderId);
     const rawOrders = localStorage.getItem(STORAGE_KEYS.ORDERS);
     const currentOrders: Order[] = rawOrders ? JSON.parse(rawOrders) : INITIAL_ORDERS;
     const target = currentOrders.find((o) => o.id === orderId);
@@ -575,20 +555,6 @@ class DataService {
       target.status = newStatus;
       target.updated_at = now;
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
-    }
-
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        const { error } = await supabase
-          .from('orders')
-          .update({ status: newStatus, updated_at: now })
-          .eq('id', orderId);
-        if (error) {
-          console.error('Supabase updateOrderStatus error:', error.message);
-        }
-      } catch (e) {
-        console.error('Supabase updateOrderStatus exception:', e);
-      }
     }
 
     if (newStatus === 'ready') {
@@ -604,6 +570,17 @@ class DataService {
       tableNumber: target?.table_number,
       newStatus,
     });
+
+    // Non-blocking background update to Supabase
+    if (isSupabaseConfigured() && supabase) {
+      supabase
+        .from('orders')
+        .update({ status: newStatus, updated_at: now })
+        .eq('id', orderId)
+        .then(({ error }) => {
+          if (error) console.error('Supabase updateOrderStatus error:', error.message);
+        });
+    }
 
     return target || null;
   }
@@ -668,6 +645,7 @@ class DataService {
       (o) => o.table_number === tableNumber && o.status !== 'delivered' && o.status !== 'cancelled'
     );
     if (activeOrder) {
+      this.markMutated(activeOrder.id);
       if (type === 'waiter') activeOrder.waiter_called = true;
       if (type === 'bill') activeOrder.bill_requested = true;
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
@@ -709,6 +687,7 @@ class DataService {
       const currentOrders = await this.getOrders();
       const activeOrder = currentOrders.find((o) => o.table_number === target.table_number);
       if (activeOrder) {
+        this.markMutated(activeOrder.id);
         activeOrder.waiter_called = false;
         activeOrder.bill_requested = false;
         localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
@@ -732,6 +711,7 @@ class DataService {
 
     currentOrders.forEach((o) => {
       if (o.table_number === tableNumber && o.status !== 'delivered' && o.status !== 'cancelled') {
+        this.markMutated(o.id);
         o.status = 'delivered';
         o.bill_requested = false;
         o.waiter_called = false;
@@ -743,7 +723,7 @@ class DataService {
     if (toSettleIds.length > 0) {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
       if (isSupabaseConfigured() && supabase) {
-        await supabase
+        supabase
           .from('orders')
           .update({
             status: 'delivered',
@@ -751,7 +731,8 @@ class DataService {
             waiter_called: false,
             updated_at: now,
           })
-          .in('id', toSettleIds);
+          .in('id', toSettleIds)
+          .then(() => {});
       }
     }
 
@@ -903,11 +884,6 @@ class DataService {
   }
 
   public async resetAllDemoData(): Promise<void> {
-    try {
-      await fetch('/api/reset', { method: 'POST' });
-    } catch {
-      // Ignore error
-    }
     localStorage.removeItem(STORAGE_KEYS.CATEGORIES);
     localStorage.removeItem(STORAGE_KEYS.MENU_ITEMS);
     localStorage.removeItem(STORAGE_KEYS.TABLES);
