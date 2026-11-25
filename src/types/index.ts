@@ -29,6 +29,22 @@ export interface UserProfile {
   created_at: string;
 }
 
+export type StaffAccountRole = 'admin' | 'waiter' | 'kitchen';
+
+export interface StaffAccount {
+  id: string;
+  role: StaffAccountRole;
+  full_name: string;
+  phone_masked: string;
+  phone_local?: string; // Stored only in localStorage for editing, never written to Firestore
+  pin_hash: string;
+  badge_id: string;
+  status: 'active' | 'inactive';
+  assigned_tables?: number[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -85,6 +101,34 @@ export interface OrderItem {
   line_total: number;
 }
 
+export type CustomerTier = 'silver' | 'gold' | 'platinum';
+
+export type CustomerSessionMode = 'undecided' | 'guest' | 'account';
+
+export interface CustomerAccount {
+  id: string;
+  full_name: string;
+  phone_masked: string;
+  pin_hash: string;
+  cashback_balance: number;
+  total_spent: number;
+  total_orders: number;
+  tier: CustomerTier;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CashbackTransaction {
+  id: string;
+  account_id: string;
+  type: 'earned' | 'spent' | 'refunded' | 'welcome_bonus';
+  amount: number;
+  order_id?: string;
+  order_number?: string;
+  description: string;
+  created_at: string;
+}
+
 export interface Order {
   id: string;
   order_number: string; // e.g. "#DF-1082"
@@ -92,6 +136,11 @@ export interface Order {
   table_number: number;
   status: OrderStatus;
   total_amount: number;
+  subtotal_amount?: number;
+  cashback_used?: number;
+  cashback_earned?: number;
+  customer_account_id?: string;
+  customer_name?: string;
   customer_note?: string;
   waiter_called?: boolean;
   waiter_call_note?: string;
@@ -145,12 +194,35 @@ export interface DishReview {
   created_at: string;
 }
 
+export type RestaurantLevelTier = 'platinum' | 'gold' | 'silver' | 'bronze' | 'critical';
+
+export interface RestaurantLevelInfo {
+  tier: RestaurantLevelTier;
+  levelNumber: 1 | 2 | 3 | 4 | 5;
+  title: string;
+  shortLabel: string;
+  subtitle: string;
+  minScore: number;
+  nextLevelTitle?: string;
+  nextLevelMinScore?: number;
+  pointsToNextLevel: number;
+  progressPercent: number;
+  isAtRisk: boolean;
+  categoryAverages: {
+    food: number | null;
+    speed: number | null;
+    waiter: number | null;
+    atmosphere: number | null;
+  };
+}
+
 export interface RestaurantRatingSummary {
   averageRating: number;
   totalReviews: number;
   dishReviewsCount: number;
   orderReviewsCount: number;
   distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+  level: RestaurantLevelInfo;
 }
 
 export interface CartItem {

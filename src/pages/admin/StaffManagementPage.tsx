@@ -2,7 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AdminSidebar } from '../../components/AdminSidebar';
 import { AdminHeader } from '../../components/AdminHeader';
-import { Waiter, WaiterShiftStatus } from '../../types';
+import { Waiter, WaiterShiftStatus, StaffAccountRole } from '../../types';
+import { STAFF_ROLE_LABELS } from '../../services/staffAccount';
+import { UzPhoneInput, isValidUzPhone } from '../../components/UzPhoneInput';
 import {
   Users,
   UserPlus,
@@ -27,6 +29,9 @@ import {
   Printer,
   ChevronRight,
   Filter,
+  ChefHat,
+  UserCheck,
+  KeyRound,
 } from 'lucide-react';
 
 export const StaffManagementPage: React.FC = () => {
@@ -40,7 +45,20 @@ export const StaffManagementPage: React.FC = () => {
     restaurantName,
     restaurantBranch,
     addToast,
+    staffAccounts,
+    activeStaffAccount,
+    openStaffAccountModal,
+    deleteStaffAccount,
   } = useApp();
+
+  // System Staff Accounts (Admin / Ofitsiant / Oshpaz) filters & inline delete confirm
+  const [accountRoleFilter, setAccountRoleFilter] = useState<'all' | StaffAccountRole>('all');
+  const [confirmDeleteAccountId, setConfirmDeleteAccountId] = useState<string | null>(null);
+
+  const filteredStaffAccounts = useMemo(() => {
+    if (accountRoleFilter === 'all') return staffAccounts;
+    return staffAccounts.filter((a) => a.role === accountRoleFilter);
+  }, [staffAccounts, accountRoleFilter]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -136,12 +154,9 @@ export const StaffManagementPage: React.FC = () => {
       errors.badgeId = "Ofitsiant ID raqami (masalan, OF-01) kiritilishi shart";
     }
 
-    // Phone validation
-    const cleanPhone = formPhone.replace(/\s+/g, '');
-    if (!cleanPhone || cleanPhone === '+998') {
-      errors.phone = "Telefon raqami kiritilishi shart";
-    } else if (cleanPhone.length < 13) {
-      errors.phone = "Telefon raqamini to'liq kiriting (masalan: +998 90 123 45 67)";
+    // Strict Uzbekistan +998 phone validation
+    if (!isValidUzPhone(formPhone)) {
+      errors.phone = "Faqat O'zbekiston raqamini to'liq kiriting (+998 XX XXX-XX-XX)";
     }
 
     // JSHIR validation (14 digits)
@@ -214,13 +229,9 @@ export const StaffManagementPage: React.FC = () => {
     }
   };
 
-  // Phone auto format
+  // Phone auto format (locked +998 via UzPhoneInput)
   const handlePhoneChange = (val: string) => {
-    let raw = val;
-    if (!raw.startsWith('+998')) {
-      raw = '+998 ' + raw.replace(/^\+?998\s*/, '');
-    }
-    setFormPhone(raw);
+    setFormPhone(val);
   };
 
   // JSHIR input cleaner (only numbers, max 14)
@@ -382,6 +393,196 @@ export const StaffManagementPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* System Staff Accounts Management (Admin / Ofitsiant / Oshpaz) */}
+          <section className="bg-white p-5 sm:p-6 rounded-3xl border border-[#E5E0D8] shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-[#173F35]/10 text-[#173F35] flex items-center justify-center shrink-0">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-display font-bold text-base sm:text-lg text-[#173F35]">
+                    Tizim akkauntlari (Admin · Ofitsiant · Oshpaz)
+                  </h2>
+                  <p className="text-xs text-[#737A75]">
+                    +998 telefon raqami va 4 xonali PIN orqali kiruvchi xodim akkauntlarini yaratish va tahrirlash
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  openStaffAccountModal(
+                    null,
+                    accountRoleFilter === 'all' ? 'admin' : accountRoleFilter
+                  )
+                }
+                className="px-4 py-2.5 rounded-xl bg-[#173F35] hover:bg-[#235B4E] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
+              >
+                <UserPlus className="w-4 h-4 text-amber-300" />
+                <span>Yangi akkaunt yaratish</span>
+              </button>
+            </div>
+
+            {/* Role Filter Tabs */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {(
+                [
+                  { id: 'all', label: `Barchasi (${staffAccounts.length})` },
+                  {
+                    id: 'admin',
+                    label: `Admin (${staffAccounts.filter((a) => a.role === 'admin').length})`,
+                  },
+                  {
+                    id: 'waiter',
+                    label: `Ofitsiant (${staffAccounts.filter((a) => a.role === 'waiter').length})`,
+                  },
+                  {
+                    id: 'kitchen',
+                    label: `Oshpaz (${staffAccounts.filter((a) => a.role === 'kitchen').length})`,
+                  },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setAccountRoleFilter(tab.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                    accountRoleFilter === tab.id
+                      ? 'bg-[#173F35] text-white border-[#173F35]'
+                      : 'bg-[#FAF8F3] text-[#59635E] border-[#E5E0D8] hover:border-[#173F35]/40'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredStaffAccounts.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-[#FAF8F3] border border-[#E5E0D8] text-center text-xs text-[#737A75]">
+                Tanlangan rol bo&apos;yicha akkaunt topilmadi. Yuqoridagi tugma orqali yangi akkaunt yarating.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {filteredStaffAccounts.map((acc) => {
+                  const RoleIcon =
+                    acc.role === 'admin'
+                      ? ShieldCheck
+                      : acc.role === 'waiter'
+                      ? UserCheck
+                      : ChefHat;
+                  const roleTone =
+                    acc.role === 'admin'
+                      ? 'bg-emerald-50 text-[#173F35] border-emerald-200'
+                      : acc.role === 'waiter'
+                      ? 'bg-amber-50 text-amber-900 border-amber-200'
+                      : 'bg-slate-100 text-slate-800 border-slate-300';
+                  const isCurrent = activeStaffAccount?.id === acc.id;
+
+                  return (
+                    <div
+                      key={acc.id}
+                      className="p-4 rounded-2xl bg-[#FAF8F3] border border-[#E5E0D8] flex flex-col justify-between gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-[#173F35] text-amber-300 flex items-center justify-center shrink-0">
+                            <RoleIcon className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h3 className="font-bold text-sm text-[#202622] truncate">
+                                {acc.full_name}
+                              </h3>
+                              {isCurrent && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                  Joriy
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${roleTone}`}>
+                                {STAFF_ROLE_LABELS[acc.role]}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-[#737A75] bg-white px-1.5 py-0.5 rounded border border-[#E5E0D8]">
+                                {acc.badge_id}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                  acc.status === 'active'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                {acc.status === 'active' ? 'Faol' : 'Nofaol'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-xs font-mono text-[#59635E] flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-[#E5E0D8]">
+                        <span className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-[#173F35]" />
+                          <span>{acc.phone_local || acc.phone_masked}</span>
+                        </span>
+                        {acc.role === 'waiter' && acc.assigned_tables && acc.assigned_tables.length > 0 && (
+                          <span className="font-sans text-[11px] font-semibold text-[#173F35]">
+                            {acc.assigned_tables.length} stol
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => openStaffAccountModal(acc)}
+                          className="flex-1 min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 border border-[#E5E0D8] text-xs font-bold text-[#173F35] flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Tahrirlash</span>
+                        </button>
+
+                        {confirmDeleteAccountId === acc.id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteAccountId(null)}
+                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-white border border-[#E5E0D8] text-[11px] font-semibold text-[#59635E]"
+                            >
+                              Bekor
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await deleteStaffAccount(acc.id);
+                                setConfirmDeleteAccountId(null);
+                                addToast('info', "Akkaunt o'chirildi", `${acc.full_name} tizimdan o'chirildi.`);
+                              }}
+                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold"
+                            >
+                              Ha, o&apos;chirish
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAccountId(acc.id)}
+                            className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-red-50 border border-red-200 text-xs font-bold text-red-600 flex items-center justify-center gap-1 transition-colors"
+                            title="Akkauntni o'chirish"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
           {/* Quick Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -923,16 +1124,13 @@ export const StaffManagementPage: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-[#173F35] mb-1">
-                    Telefon raqam <span className="text-rose-500">*</span>
+                    O&apos;zbekiston telefon raqami (+998) <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <UzPhoneInput
                     value={formPhone}
-                    onChange={(e) => handlePhoneChange(e.target.value)}
-                    placeholder="+998 90 123 45 67"
-                    className={`w-full px-3.5 py-2.5 bg-[#FAF8F3] border rounded-xl text-xs font-mono font-bold focus:outline-hidden focus:ring-2 focus:ring-[#173F35] ${
-                      formErrors.phone ? 'border-rose-400 bg-rose-50/50' : 'border-[#E5E0D8]'
-                    }`}
+                    onChange={handlePhoneChange}
+                    required
+                    placeholder="90 123-45-67"
                   />
                   {formErrors.phone && (
                     <p className="text-[11px] text-rose-500 mt-1 font-semibold">{formErrors.phone}</p>

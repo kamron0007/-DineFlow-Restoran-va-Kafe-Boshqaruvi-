@@ -20,8 +20,13 @@ import {
   Users,
   Phone,
   ShieldCheck,
+  Wallet,
+  Pencil,
+  UserPlus,
+  LogOut,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { OrderTickBadge } from '../../components/OrderTickBadge';
 
 export const WaiterDashboard: React.FC = () => {
   const {
@@ -34,11 +39,20 @@ export const WaiterDashboard: React.FC = () => {
     settleAndFreeTable,
     soundEnabled,
     setSoundEnabled,
-    setUserRole,
     simulateWaiterNotification,
     restaurantName,
     restaurantBranch,
+    activeStaffAccount,
+    staffAccounts,
+    openStaffAccountModal,
+    logoutStaffAccount,
   } = useApp();
+  const navigate = useNavigate();
+
+  const activeWaiterAccount =
+    (activeStaffAccount?.role === 'waiter' ? activeStaffAccount : null) ||
+    staffAccounts.find((a) => a.role === 'waiter') ||
+    null;
 
   const { timeString, dateString } = useLiveClock();
 
@@ -87,99 +101,115 @@ export const WaiterDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#FAF8F3] text-[#202622] flex flex-col">
-      {/* Top Bar for Waiter Terminal */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#E5E0D8] px-4 py-3 shadow-xs">
+      {/* Deep Oceanic Teal Top Bar for Waiter Terminal */}
+      <header className="sticky top-0 z-40 bg-[#173F35] text-white border-b border-white/10 px-4 sm:px-6 py-3">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#173F35] text-white flex items-center justify-center font-bold shadow-sm">
-              <UtensilsCrossed className="w-5 h-5 text-amber-400" />
+            <div className="w-10 h-10 rounded-xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center font-bold shadow-[0_6px_18px_-6px_rgba(245,158,11,0.6)]">
+              <UtensilsCrossed className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-display font-bold text-lg text-[#173F35] leading-none">
-                  Ofitsiant TerminaIi
+                <h1 className="font-display font-extrabold text-lg text-white leading-none">
+                  Ofitsiant Terminali
                 </h1>
-                <span className="text-[11px] font-semibold bg-emerald-100 text-[#173F35] px-2 py-0.5 rounded-full">
-                  Zal smenasi
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#F59E0B]">
+                  · Zal smenasi
                 </span>
               </div>
-              <p className="text-xs text-[#737A75] mt-0.5">{restaurantName || 'Zafaran Grand'} — {restaurantBranch || 'Toshkent'}</p>
+              <p className="text-xs text-emerald-100/70 mt-0.5">
+                {restaurantName || 'Zafaran Grand'} — {restaurantBranch || 'Toshkent'}
+              </p>
             </div>
           </div>
 
-          {/* Real-time Clock Widget - High Visibility & Contrast */}
-          <div className="flex items-center gap-2.5 bg-[#173F35] text-white px-3.5 py-1.5 rounded-xl shadow-md border border-[#235B4E]">
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
-              </span>
-              <Clock className="w-4 h-4 text-emerald-300" />
-            </div>
+          {/* Clean Real-Time Clock Widget */}
+          <div className="flex items-center gap-2 bg-white/8 text-white px-3.5 py-1.5 rounded-full border border-white/14">
+            <Clock className="w-4 h-4 text-[#F59E0B]" />
             <div className="flex items-center gap-2 font-mono">
-              <span className="hidden sm:inline text-xs font-sans text-emerald-100 font-medium">
+              <span className="hidden sm:inline text-xs font-sans text-emerald-100/80 font-medium">
                 {dateString}
               </span>
-              <span className="text-emerald-400/50 hidden sm:inline">•</span>
-              <span className="font-extrabold text-base sm:text-lg text-white tabular-nums tracking-wider bg-black/30 px-2.5 py-0.5 rounded-lg border border-white/10 shadow-inner">
+              <span className="text-white/25 hidden sm:inline">·</span>
+              <span className="font-extrabold text-sm sm:text-base text-[#F59E0B] tabular-nums tracking-wider">
                 {timeString}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
-            {/* Quick alert tester for waiter real-time notifications */}
-            <div className="hidden lg:flex items-center gap-1.5 bg-[#FAF8F3] p-1 rounded-xl border border-[#E5E0D8] text-xs">
-              <span className="text-[10px] font-bold text-[#737A75] px-1.5 uppercase tracking-wider">
-                Real-time Test:
-              </span>
+          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap justify-end">
+            {/* Quick alert tester */}
+            <div className="hidden xl:flex items-center gap-1.5 bg-white/6 p-1 rounded-full border border-white/12 text-xs">
               <button
+                type="button"
                 onClick={() => simulateWaiterNotification('kitchen_ready')}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-lg border border-emerald-200/80 flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+                className="bg-white/10 hover:bg-white/18 text-emerald-50 font-semibold px-3 py-1 rounded-full flex items-center gap-1 transition-all active:scale-95 text-[11px]"
                 title="Oshxona buyurtmasi tayyor bo'lganini bildirishnoma orqali tekshirish"
               >
-                <ChefHat className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Oshxona (Tayyor)</span>
+                <ChefHat className="w-3.5 h-3.5 text-[#F59E0B]" />
+                <span>Oshxona</span>
               </button>
               <button
+                type="button"
                 onClick={() => simulateWaiterNotification('customer_call')}
-                className="bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-lg border border-amber-200/80 flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+                className="bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 font-semibold px-3 py-1 rounded-full flex items-center gap-1 transition-all active:scale-95 text-[11px]"
                 title="Mijoz ofitsiantni chaqirganini bildirishnoma orqali tekshirish"
               >
-                <Bell className="w-3.5 h-3.5 text-amber-600 animate-bounce" />
-                <span>Mijoz Chaqiruvi</span>
+                <Bell className="w-3.5 h-3.5 text-amber-300" />
+                <span>Chaqiruv</span>
               </button>
             </div>
 
             {/* Sound toggle */}
             <button
+              type="button"
               onClick={() => setSoundEnabled(!soundEnabled)}
-              className="p-2 rounded-xl border border-[#E5E0D8] text-[#737A75] hover:text-[#202622] bg-[#FAF8F3] transition-colors"
-              title={soundEnabled ? 'Ovozni o\'chirish' : 'Ovozni yoqish'}
+              className="p-2 rounded-full border border-white/14 text-emerald-100 hover:text-white bg-white/8 hover:bg-white/14 transition-colors"
+              title={soundEnabled ? "Ovozni o'chirish" : 'Ovozni yoqish'}
             >
-              {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-600" /> : <VolumeX className="w-4 h-4" />}
+              {soundEnabled ? <Volume2 className="w-4 h-4 text-[#F59E0B]" /> : <VolumeX className="w-4 h-4" />}
             </button>
 
-            {/* Quick role switcher to Admin / Kitchen / Customer */}
-            <div className="flex items-center gap-1 bg-[#FAF8F3] p-1 rounded-xl border border-[#E5E0D8] text-xs">
+            {/* Role login links & Logout */}
+            <div className="flex items-center gap-1 bg-white/8 p-1 rounded-full border border-white/14 text-xs">
               <button
-                onClick={() => setUserRole('admin')}
-                className="px-2.5 py-1 rounded-lg text-[#737A75] hover:text-[#202622]"
+                type="button"
+                onClick={() => {
+                  logoutStaffAccount();
+                  navigate('/login?role=admin');
+                }}
+                className="px-2.5 py-1 rounded-full text-emerald-100/80 hover:text-white hover:bg-white/10"
               >
                 Admin
               </button>
               <button
-                onClick={() => setUserRole('kitchen')}
-                className="px-2.5 py-1 rounded-lg text-[#737A75] hover:text-[#202622]"
+                type="button"
+                onClick={() => {
+                  logoutStaffAccount();
+                  navigate('/login?role=kitchen');
+                }}
+                className="px-2.5 py-1 rounded-full text-emerald-100/80 hover:text-white hover:bg-white/10"
               >
-                KDS Oshxona
+                KDS
               </button>
               <Link
                 to="/menu"
-                className="px-2.5 py-1 rounded-lg text-[#737A75] hover:text-[#202622]"
+                className="px-2.5 py-1 rounded-full text-emerald-100/80 hover:text-white hover:bg-white/10"
               >
-                Mijoz menyusi
+                Menyu
               </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  logoutStaffAccount();
+                  navigate('/login?role=waiter');
+                }}
+                className="px-2.5 py-1 rounded-full text-red-200 hover:text-white hover:bg-red-500/25 font-semibold flex items-center gap-1"
+                title="Tizimdan chiqish"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Chiqish</span>
+              </button>
             </div>
           </div>
         </div>
@@ -187,11 +217,11 @@ export const WaiterDashboard: React.FC = () => {
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 space-y-5">
         {/* Active Waiter Profile Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#173F35] text-amber-300 flex flex-col items-center justify-center font-bold shadow-sm border border-emerald-900/30 shrink-0">
-              <span className="text-[9px] uppercase tracking-wider opacity-80">ID</span>
-              <span className="text-xs font-black">{activeWaiter?.badge_id || 'OF-01'}</span>
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E5E0D8] shadow-[0_8px_28px_-18px_rgba(23,63,53,0.14)] flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[#173F35] text-[#F59E0B] flex flex-col items-center justify-center font-bold shrink-0">
+              <span className="text-[9px] uppercase tracking-wider opacity-75">ID</span>
+              <span className="text-xs font-mono font-extrabold">{activeWaiter?.badge_id || 'OF-01'}</span>
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -199,18 +229,18 @@ export const WaiterDashboard: React.FC = () => {
                 <span className="font-display font-bold text-sm text-[#173F35]">
                   {activeWaiter?.full_name || 'Karimov Dilshod Baxtiyorovich'}
                 </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {activeWaiter?.role_title || 'Ofitsiant'}
+                <span className="text-[10px] font-bold text-[#1E5245]">
+                  · {activeWaiter?.role_title || 'Ofitsiant'}
                 </span>
               </div>
               <div className="flex items-center gap-3 text-xs text-[#737A75] font-mono mt-0.5 flex-wrap">
                 <span className="flex items-center gap-1">
-                  <Phone className="w-3 h-3 text-emerald-600" />
+                  <Phone className="w-3 h-3 text-[#1E5245]" />
                   <span>{activeWaiter?.phone || '+998 90 123 45 67'}</span>
                 </span>
                 {activeWaiter?.jshir && (
                   <span className="flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-blue-600" />
+                    <ShieldCheck className="w-3 h-3 text-[#1E5245]" />
                     <span>JSHIR: {activeWaiter.jshir}</span>
                   </span>
                 )}
@@ -224,12 +254,11 @@ export const WaiterDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Waiter Switcher Dropdown */}
             {waiters.length > 1 && (
               <select
                 value={activeWaiterId}
                 onChange={(e) => handleSelectWaiter(e.target.value)}
-                className="px-3 py-1.5 bg-[#FAF8F3] border border-[#E5E0D8] rounded-xl text-xs font-bold text-[#173F35] focus:outline-hidden focus:ring-2 focus:ring-[#173F35]"
+                className="px-3.5 py-2 bg-[#FAF8F3] border border-[#E5E0D8] rounded-full text-xs font-bold text-[#173F35] focus:outline-none focus:border-[#173F35]"
               >
                 {waiters.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -239,55 +268,74 @@ export const WaiterDashboard: React.FC = () => {
               </select>
             )}
 
-            {/* Filter by assigned tables */}
             {activeWaiter?.assigned_tables && activeWaiter.assigned_tables.length > 0 && (
               <button
+                type="button"
                 onClick={() => setFilterMyTablesOnly(!filterMyTablesOnly)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                className={`px-3.5 py-2 rounded-full text-xs font-bold transition-all border ${
                   filterMyTablesOnly
-                    ? 'bg-[#173F35] text-white border-[#173F35] shadow-xs'
-                    : 'bg-[#FAF8F3] text-[#737A75] border-[#E5E0D8] hover:text-[#173F35]'
+                    ? 'bg-[#173F35] text-white border-[#173F35]'
+                    : 'bg-[#FAF8F3] text-[#59635E] border-[#E5E0D8] hover:text-[#173F35]'
                 }`}
               >
-                {filterMyTablesOnly ? '✓ Mening stollarim (faol)' : 'Mening stollarim'}
+                {filterMyTablesOnly ? '✓ Mening stollarim' : 'Mening stollarim'}
               </button>
             )}
 
+            <button
+              type="button"
+              onClick={() => openStaffAccountModal(activeWaiterAccount, 'waiter')}
+              className="px-3.5 py-2 rounded-full bg-[#E8F0EC] hover:bg-[#DCE8E2] border border-[#F59E0B]/40 text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all"
+              title="Ofitsiant akkauntini tahrirlash"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Tahrirlash</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openStaffAccountModal(null, 'waiter')}
+              className="px-3.5 py-2 rounded-full bg-[#173F35] hover:bg-[#1E5245] text-xs font-bold text-white flex items-center gap-1.5 transition-all"
+              title="Yangi ofitsiant akkaunti yaratish"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-[#F59E0B]" />
+              <span>+ Akkaunt</span>
+            </button>
+
             <Link
               to="/admin/waiters"
-              className="px-3 py-1.5 rounded-xl bg-[#FAF8F3] hover:bg-[#F2ECE1] border border-[#E5E0D8] text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all shadow-xs"
+              className="px-3.5 py-2 rounded-full bg-[#FAF8F3] hover:bg-[#EFEAE0] border border-[#E5E0D8] text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all"
             >
-              <Users className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Xodimlarni boshqarish</span>
+              <Users className="w-3.5 h-3.5 text-[#1E5245]" />
+              <span>Xodimlar</span>
             </Link>
           </div>
         </div>
 
         {/* Real-time Toast Alerts Status Banner */}
-        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-amber-50 p-3 sm:p-3.5 rounded-2xl border border-emerald-200/80 shadow-xs flex items-center justify-between gap-3 flex-wrap text-xs">
+        <div className="bg-white p-3.5 rounded-2xl border border-[#E5E0D8] flex items-center justify-between gap-3 flex-wrap text-xs">
           <div className="flex items-center gap-2.5">
-            <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B] shrink-0" />
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold text-[#173F35]">Jonli Bildirishnomalar Faol:</span>
-              <span className="text-[#737A75]">
-                Oshxona taom tayyorlaganda yoki mijoz chaqirganda real vaqtda ovozli bildirishnoma (toast) chiqadi.
+              <span className="font-bold text-[#173F35]">Jonli bildirishnomalar faol:</span>
+              <span className="text-[#59635E]">
+                Oshxona taom tayyorlaganda yoki mijoz chaqirganda real vaqtda ovozli ogohlantirish chiqadi.
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
+              type="button"
               onClick={() => simulateWaiterNotification('kitchen_ready')}
-              className="bg-white hover:bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-xl border border-emerald-300 shadow-xs flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+              className="bg-[#FAF8F3] hover:bg-[#E8F0EC] text-[#173F35] font-bold px-3 py-1.5 rounded-full border border-[#E5E0D8] flex items-center gap-1 transition-all active:scale-95 text-[11px]"
             >
-              <ChefHat className="w-3.5 h-3.5 text-emerald-600" />
+              <ChefHat className="w-3.5 h-3.5 text-[#1E5245]" />
               <span>Tayyor taom testi</span>
             </button>
             <button
+              type="button"
               onClick={() => simulateWaiterNotification('customer_call')}
-              className="bg-white hover:bg-amber-50 text-amber-900 font-bold px-2.5 py-1 rounded-xl border border-amber-300 shadow-xs flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+              className="bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold px-3 py-1.5 rounded-full border border-amber-200 flex items-center gap-1 transition-all active:scale-95 text-[11px]"
             >
               <Bell className="w-3.5 h-3.5 text-amber-600" />
               <span>Mijoz chaqiruvi testi</span>
@@ -504,11 +552,25 @@ export const WaiterDashboard: React.FC = () => {
                           <Clock className="w-3 h-3" />
                           <span>{formatShortTime(order.created_at)} ({formatTimeAgo(order.created_at)})</span>
                         </span>
+                        {(order.customer_name || (order.cashback_used || 0) > 0) && (
+                          <div className="flex items-center gap-1.5 mt-1 text-[11px] text-[#173F35] font-semibold flex-wrap">
+                            <Wallet className="w-3 h-3 text-amber-600 shrink-0" />
+                            {order.customer_name && <span>{order.customer_name}</span>}
+                            {(order.cashback_used || 0) > 0 && (
+                              <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded-md tabular-nums">
+                                Keshbek: -{formatUZS(order.cashback_used || 0)}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
-                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${statusCfg.badgeBg}`}>
-                        {statusCfg.label}
-                      </span>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${statusCfg.badgeBg}`}>
+                          {statusCfg.label}
+                        </span>
+                        <OrderTickBadge status={order.status} />
+                      </div>
                     </div>
 
                     {/* Dishes summary */}

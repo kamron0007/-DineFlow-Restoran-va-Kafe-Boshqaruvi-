@@ -43,6 +43,9 @@ export function formatShortTime(isoDate: string): string {
   }
 }
 
+export const formatPrice = formatUZS;
+export const formatTime = formatShortTime;
+
 export function generateOrderNumber(): string {
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `#DF-${randomSuffix}`;

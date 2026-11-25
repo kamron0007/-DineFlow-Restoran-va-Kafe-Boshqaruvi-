@@ -28,7 +28,10 @@ import {
   BarChart2,
   Users,
   Star,
+  Award,
+  AlertTriangle,
 } from 'lucide-react';
+import { RESTAURANT_LEVEL_SCALE } from '../../utils/restaurantLevel';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -169,121 +172,127 @@ export const AdminDashboard: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0">
         <AdminHeader />
 
-        <main className="flex-1 p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Top Welcome & Global Action Header */}
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-gradient-to-r from-emerald-50/70 via-white to-amber-50/30 p-5 rounded-2xl border border-[#E5E0D8] shadow-xs">
-            <div className="flex flex-col gap-1.5 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-display font-bold text-xl sm:text-2xl text-[#173F35] tracking-tight">
-                  Xush kelibsiz, Boymurodov Kamronbek
-                </h1>
-                <span className="text-[11px] font-semibold bg-[#E8F0EC] text-[#173F35] px-2.5 py-0.5 rounded-full shrink-0">
-                  Bosh administrator
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-[#737A75] flex-wrap">
-                <div className="flex items-center gap-1 font-semibold text-[#173F35]">
-                  <Store className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  <span>"{restaurantName || 'Zafaran Grand'}" — {restaurantBranch || 'Toshkent Markaziy filiali'}</span>
+        <main className="flex-1 p-4 sm:p-6 lg:p-7 space-y-5 max-w-[1400px] w-full mx-auto">
+          {/* Compact, Ideally Proportioned Executive Control Header */}
+          <div className="rounded-2xl bg-[#173F35] text-white px-5 py-4 sm:px-6 sm:py-5 shadow-[0_14px_36px_-22px_rgba(15,45,37,0.55)]">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 text-xs sm:text-[13px] text-emerald-100/80">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-white">
+                      <Store className="w-3.5 h-3.5 text-[#F59E0B]" />
+                      {restaurantName || 'Zafaran Grand'} — {restaurantBranch || 'Toshkent Markaziy filiali'}
+                    </span>
+                    <span className="opacity-35" aria-hidden="true">·</span>
+                    <span>{tables.length} ta stol faol</span>
+                    <span className="opacity-35" aria-hidden="true">·</span>
+                    <span className="inline-flex items-center gap-1 font-mono font-bold text-white tabular-nums">
+                      <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                      <span>{restaurantRating.averageRating.toFixed(1)}</span>
+                      <span className="text-[#F59E0B] font-sans font-semibold ml-0.5">
+                        {restaurantRating.level.title} ({restaurantRating.level.levelNumber}/5)
+                      </span>
+                    </span>
+                  </div>
+
+                  <h1 className="font-display font-extrabold text-xl sm:text-2xl mt-1.5 tracking-tight">
+                    <span className="text-white">Boshqaruv paneli · </span>
+                    <span className="text-[#F59E0B]">
+                      {currentUser?.full_name || 'Boymurodov Kamronbek'}
+                    </span>
+                  </h1>
                 </div>
-                <span>·</span>
-                <span className="text-[#173F35] font-medium">
-                  {tables.length} ta stol / Barcha zallar faol
-                </span>
-                <span>·</span>
-                <span className="inline-flex items-center gap-1 font-bold text-[#173F35] tabular-nums">
-                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                  <span>{restaurantRating.averageRating.toFixed(1)}</span>
-                  <span className="font-normal text-[#737A75]">
-                    ({restaurantRating.totalReviews} ta baho)
-                  </span>
-                </span>
-              </div>
-            </div>
 
-            {/* Action Bar & Responsive Period Switcher */}
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Period Switcher: Soatlik / Haftalik / O'nlik / Oylik */}
-              <div className="bg-white p-1 rounded-xl border border-[#E5E0D8] shadow-xs flex items-center flex-wrap gap-1">
-                <button
-                  onClick={() => setPeriod('hourly')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    period === 'hourly' || period === 'today'
-                      ? 'bg-[#173F35] text-white shadow-xs'
-                      : 'text-[#737A75] hover:text-[#202622]'
-                  }`}
-                >
-                  <span>Bugun (Soatbay)</span>
-                  <span className="font-mono text-[11px] opacity-90 tabular-nums font-bold">
-                    ({timeString})
-                  </span>
-                </button>
-                <button
-                  onClick={() => setPeriod('week')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    period === 'week'
-                      ? 'bg-[#173F35] text-white shadow-xs'
-                      : 'text-[#737A75] hover:text-[#202622]'
-                  }`}
-                >
-                  Haftalik (7 kun)
-                </button>
-                <button
-                  onClick={() => setPeriod('tendays')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    period === 'tendays'
-                      ? 'bg-[#173F35] text-white shadow-xs'
-                      : 'text-[#737A75] hover:text-[#202622]'
-                  }`}
-                >
-                  O'nlik (10 kun)
-                </button>
-                <button
-                  onClick={() => setPeriod('month')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    period === 'month'
-                      ? 'bg-[#173F35] text-white shadow-xs'
-                      : 'text-[#737A75] hover:text-[#202622]'
-                  }`}
-                >
-                  Oylik (30 kun)
-                </button>
+                {/* Primary Quick Action Row */}
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/orders')}
+                    className="min-h-[42px] px-4 py-2 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] text-[#173F35] text-xs sm:text-[13px] font-extrabold flex items-center gap-1.5 transition-all active:scale-95"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Yangi buyurtma</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/export-reports')}
+                    className="min-h-[42px] px-4 py-2 rounded-full bg-white/10 hover:bg-white/18 border border-white/18 text-white text-xs sm:text-[13px] font-semibold flex items-center gap-1.5 transition-all"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>CSV Eksport</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/waiters')}
+                    className="min-h-[42px] px-4 py-2 rounded-full bg-white/10 hover:bg-white/18 border border-white/18 text-white text-xs sm:text-[13px] font-semibold flex items-center gap-1.5 transition-all"
+                  >
+                    <Users className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>Ofitsiantlar ({waiters.length})</span>
+                  </button>
+                </div>
               </div>
 
-              <button
-                onClick={() => navigate('/admin/export-reports')}
-                className="bg-white hover:bg-slate-50 text-[#173F35] px-3 py-1.5 rounded-xl border border-[#E5E0D8] text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
-                title="Kunlik, haftalik, 10-kunlik va oylik hisobotlarni yuklab olish markazi"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>CSV Eksport Markazi</span>
-              </button>
+              {/* Clean Period Switcher */}
+              <div className="pt-3.5 border-t border-white/12 flex flex-wrap items-center justify-between gap-3">
+                <div className="bg-white/8 p-1 rounded-full border border-white/14 flex items-center flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPeriod('hourly')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                      period === 'hourly' || period === 'today'
+                        ? 'bg-[#F59E0B] text-[#173F35] font-bold'
+                        : 'text-emerald-100/80 hover:text-white'
+                    }`}
+                  >
+                    <span>Bugun (Soatbay)</span>
+                    <span className="font-mono text-xs tabular-nums font-bold">
+                      {timeString}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPeriod('week')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                      period === 'week'
+                        ? 'bg-[#F59E0B] text-[#173F35] font-bold'
+                        : 'text-emerald-100/80 hover:text-white'
+                    }`}
+                  >
+                    Haftalik (7 kun)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPeriod('tendays')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                      period === 'tendays'
+                        ? 'bg-[#F59E0B] text-[#173F35] font-bold'
+                        : 'text-emerald-100/80 hover:text-white'
+                    }`}
+                  >
+                    O&apos;nlik (10 kun)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPeriod('month')}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                      period === 'month'
+                        ? 'bg-[#F59E0B] text-[#173F35] font-bold'
+                        : 'text-emerald-100/80 hover:text-white'
+                    }`}
+                  >
+                    Oylik (30 kun)
+                  </button>
+                </div>
 
-              <button
-                onClick={() => navigate('/admin/market-benchmark')}
-                className="bg-white hover:bg-slate-50 text-[#173F35] px-3 py-1.5 rounded-xl border border-[#E5E0D8] text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
-                title="O'zbekistonda restoran o'sishi va raqobatchilar bilan solishtirma"
-              >
-                <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
-                <span>Bozor Tahlili</span>
-              </button>
-
-              <button
-                onClick={() => navigate('/admin/waiters')}
-                className="bg-white hover:bg-slate-50 text-[#173F35] px-3 py-1.5 rounded-xl border border-[#E5E0D8] text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
-                title="Ofitsiantlar ro'yxati, F.I.SH, Telefon, JSHIR va ID boshqaruvi"
-              >
-                <Users className="w-3.5 h-3.5 text-blue-600" />
-                <span>Ofitsiantlar ({waiters.length})</span>
-              </button>
-
-              <button
-                onClick={() => navigate('/admin/orders')}
-                className="bg-[#173F35] hover:bg-[#235B4E] text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
-              >
-                <PlusCircle className="w-3.5 h-3.5" />
-                <span>Yangi buyurtma</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin/market-benchmark')}
+                  className="text-xs sm:text-[13px] font-semibold text-[#F59E0B] hover:text-[#FDE68A] inline-flex items-center gap-1 transition-colors"
+                >
+                  <span>O&apos;zbekiston bozor tahlili</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -327,13 +336,122 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
+          {/* Live Restaurant Level & Rating Impact Panel */}
+          <div className="bg-white rounded-3xl border border-[#E5E0D8] p-5 sm:p-6 shadow-[0_8px_28px_-18px_rgba(23,63,53,0.14)]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
+              {/* Left: Current Level Identity */}
+              <div className="lg:col-span-5 flex items-start gap-3.5">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                    restaurantRating.level.isAtRisk
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-[#173F35] text-[#F59E0B]'
+                  }`}
+                >
+                  {restaurantRating.level.isAtRisk ? (
+                    <AlertTriangle className="w-6 h-6" />
+                  ) : (
+                    <Award className="w-6 h-6" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#737A75]">
+                      Restoran darajasi · {restaurantRating.level.levelNumber}/5
+                    </span>
+                    {restaurantRating.level.isAtRisk && (
+                      <span className="text-[11px] font-bold text-amber-800">
+                        · Reyting pasaygan
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-2.5 mt-0.5 flex-wrap">
+                    <h2 className="font-display font-extrabold text-xl text-[#173F35]">
+                      {restaurantRating.level.title}
+                    </h2>
+                    <span className="inline-flex items-center gap-1 font-mono font-extrabold text-base text-[#173F35] tabular-nums">
+                      <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                      {restaurantRating.averageRating.toFixed(1)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#59635E] mt-1 leading-relaxed">
+                    {restaurantRating.level.subtitle}
+                  </p>
+                </div>
+              </div>
+
+              {/* Center: 5-Level Scale Bar */}
+              <div className="lg:col-span-4 space-y-2 lg:border-x lg:border-[#F2EFE9] lg:px-5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-[#202622]">
+                    Mehmon baholari: {restaurantRating.totalReviews} ta
+                  </span>
+                  <span className="text-[#737A75] tabular-nums">
+                    {restaurantRating.level.nextLevelTitle
+                      ? `Keyingi: ${restaurantRating.level.nextLevelTitle} (${restaurantRating.level.nextLevelMinScore?.toFixed(1)}★)`
+                      : 'Maksimal daraja (5/5)'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {RESTAURANT_LEVEL_SCALE.map((lvl) => {
+                    const active = restaurantRating.level.levelNumber === lvl.levelNumber;
+                    const passed = restaurantRating.level.levelNumber >= lvl.levelNumber;
+                    return (
+                      <div key={lvl.tier} className="space-y-1">
+                        <div
+                          className={`h-2 rounded-full transition-all ${
+                            active
+                              ? 'bg-[#F59E0B]'
+                              : passed
+                              ? 'bg-[#173F35]'
+                              : 'bg-[#E5E0D8]'
+                          }`}
+                        />
+                        <span
+                          className={`block text-[10px] truncate ${
+                            active ? 'font-bold text-[#173F35]' : 'text-[#737A75]'
+                          }`}
+                        >
+                          {lvl.title.split(' ')[0]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-[#737A75] tabular-nums">
+                  {restaurantRating.dishReviewsCount} ta taom bahosi · {restaurantRating.orderReviewsCount} ta xizmat bahosi
+                </p>
+              </div>
+
+              {/* Right: Service Criteria Breakdown */}
+              <div className="lg:col-span-3 grid grid-cols-2 gap-2.5">
+                {[
+                  { label: 'Taom', val: restaurantRating.level.categoryAverages.food },
+                  { label: 'Tezlik', val: restaurantRating.level.categoryAverages.speed },
+                  { label: 'Ofitsiant', val: restaurantRating.level.categoryAverages.waiter },
+                  { label: 'Muhit', val: restaurantRating.level.categoryAverages.atmosphere },
+                ].map((metric) => (
+                  <div
+                    key={metric.label}
+                    className="rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] px-3 py-2 flex items-center justify-between"
+                  >
+                    <span className="text-[11px] text-[#59635E] font-medium">{metric.label}</span>
+                    <span className="font-mono font-bold text-xs text-[#173F35] tabular-nums">
+                      {metric.val !== null ? `${metric.val.toFixed(1)}★` : `${restaurantRating.averageRating.toFixed(1)}★`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* 4 Bento KPI Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5">
             {/* Card 1: Revenue */}
             <div className="bg-white p-5 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-col justify-between">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#737A75]">
+                  <span className="text-xs font-semibold text-[#59635E]">
                     {period === 'hourly' || period === 'today'
                       ? 'Bugungi tushum'
                       : period === 'week'
@@ -342,17 +460,17 @@ export const AdminDashboard: React.FC = () => {
                       ? "O'nlik tushum (10 kun)"
                       : 'Oylik tushum'}
                   </span>
-                  <div className="mt-1 flex items-baseline gap-1">
+                  <div className="mt-1.5 flex items-baseline gap-1">
                     <span className="font-display font-bold text-2xl text-[#173F35] tabular-nums">
                       {formatUZS(periodStats.periodRevenue)}
                     </span>
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-[#E8F0EC] text-[#173F35] flex items-center justify-center shrink-0">
                   <CreditCard className="w-5 h-5" />
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-[#FAF8F3] flex items-center justify-between text-xs">
+              <div className="mt-4 pt-3 border-t border-[#F2EFE9] flex items-center justify-between text-xs">
                 <div
                   className={`flex items-center gap-1 font-bold ${
                     periodStats.isGrowthPositive ? 'text-emerald-700' : 'text-rose-600'
@@ -371,9 +489,9 @@ export const AdminDashboard: React.FC = () => {
 
             {/* Card 2: Total Orders */}
             <div className="bg-white p-5 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-col justify-between">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#737A75]">
+                  <span className="text-xs font-semibold text-[#59635E]">
                     {period === 'hourly' || period === 'today'
                       ? 'Bugungi buyurtmalar'
                       : period === 'week'
@@ -382,20 +500,20 @@ export const AdminDashboard: React.FC = () => {
                       ? "O'nlik buyurtmalar (10 kun)"
                       : 'Oylik buyurtmalar'}
                   </span>
-                  <div className="mt-1 flex items-baseline gap-1">
-                    <span className="font-display font-bold text-2xl text-[#173F35]">
+                  <div className="mt-1.5 flex items-baseline gap-1.5">
+                    <span className="font-display font-bold text-2xl text-[#173F35] tabular-nums">
                       {periodStats.periodOrdersCount}
                     </span>
                     <span className="text-xs text-[#737A75]">ta chek</span>
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-[#FAF8F3] text-[#173F35] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-[#F3EFE6] text-[#173F35] flex items-center justify-center shrink-0">
                   <Receipt className="w-5 h-5" />
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-[#FAF8F3] flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
-                  <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-semibold">
+              <div className="mt-4 pt-3 border-t border-[#F2EFE9] flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md font-semibold">
                     {periodStats.activeCount} faol
                   </span>
                   <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-semibold">
@@ -408,9 +526,9 @@ export const AdminDashboard: React.FC = () => {
                   }`}
                 >
                   {periodStats.isOrdersGrowthPositive ? (
-                    <TrendingUp className="w-3 h-3" />
+                    <TrendingUp className="w-3.5 h-3.5" />
                   ) : (
-                    <TrendingDown className="w-3 h-3" />
+                    <TrendingDown className="w-3.5 h-3.5" />
                   )}
                   <span>{periodStats.ordersGrowthPercent}</span>
                 </div>
@@ -419,22 +537,22 @@ export const AdminDashboard: React.FC = () => {
 
             {/* Card 3: Avg Check */}
             <div className="bg-white p-5 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-col justify-between">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#737A75]">
-                    O'rtacha chek qiymati
+                  <span className="text-xs font-semibold text-[#59635E]">
+                    O&apos;rtacha chek qiymati
                   </span>
-                  <div className="mt-1 flex items-baseline gap-1">
+                  <div className="mt-1.5 flex items-baseline gap-1">
                     <span className="font-display font-bold text-2xl text-[#173F35] tabular-nums">
                       {formatUZS(periodStats.avgCheck)}
                     </span>
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
                   <ArrowUpRight className="w-5 h-5" />
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-[#FAF8F3] flex items-center justify-between text-xs">
+              <div className="mt-4 pt-3 border-t border-[#F2EFE9] flex items-center justify-between text-xs">
                 <div
                   className={`flex items-center gap-1 font-bold ${
                     periodStats.isAvgCheckGrowthPositive ? 'text-emerald-700' : 'text-rose-600'
@@ -449,34 +567,34 @@ export const AdminDashboard: React.FC = () => {
                 </div>
                 <span className="text-[#737A75]">
                   {period === 'today' || period === 'hourly'
-                    ? "Kechagiga nisbatan"
+                    ? 'Kechagiga nisbatan'
                     : period === 'week'
                     ? "O'tgan 7 kunga"
-                    : "Oldingi davrga"}
+                    : 'Oldingi davrga'}
                 </span>
               </div>
             </div>
 
             {/* Card 4: Prep Time */}
             <div className="bg-white p-5 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-col justify-between">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#737A75]">
-                    O'rtacha tayyorlash
+                  <span className="text-xs font-semibold text-[#59635E]">
+                    O&apos;rtacha tayyorlash
                   </span>
-                  <div className="mt-1 flex items-baseline gap-1">
-                    <span className="font-display font-bold text-2xl text-[#173F35]">
+                  <div className="mt-1.5 flex items-baseline gap-1.5">
+                    <span className="font-display font-bold text-2xl text-[#173F35] tabular-nums">
                       {periodStats.avgPrepMinutes}
                     </span>
                     <span className="text-xs text-[#737A75]">daqiqa</span>
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-[#E8F0EC] text-[#173F35] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-[#E8F0EC] text-[#173F35] flex items-center justify-center shrink-0">
                   <Timer className="w-5 h-5" />
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-[#FAF8F3] flex items-center justify-between text-xs">
-                <span className="text-[#173F35] font-bold">Oshxona tezligi: A'lo</span>
+              <div className="mt-4 pt-3 border-t border-[#F2EFE9] flex items-center justify-between text-xs">
+                <span className="text-[#173F35] font-bold">Oshxona tezligi: A&apos;lo</span>
                 <span className="text-[#737A75]">Standart: &lt; 20 daq</span>
               </div>
             </div>
@@ -680,14 +798,14 @@ export const AdminDashboard: React.FC = () => {
                           boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                         }}
                       />
-                      <Bar dataKey="sales" radius={[6, 6, 0, 0]} cursor="pointer">
+                      <Bar dataKey="sales" radius={[8, 8, 0, 0]} cursor="pointer">
                         {salesDynamics.data.map((entry, index) => {
                           const isSelected = selectedHour === entry.time;
                           let barColor = '#173F35';
                           if (selectedHour !== 'all') {
-                            barColor = isSelected ? '#FEA619' : '#D1DCD6';
+                            barColor = isSelected ? '#F59E0B' : '#D8D1C5';
                           } else if (entry.peakType === 'lunch' || entry.peakType === 'dinner') {
-                            barColor = '#FEA619';
+                            barColor = '#F59E0B';
                           }
                           return <Cell key={`cell-${index}`} fill={barColor} />;
                         })}
@@ -706,8 +824,8 @@ export const AdminDashboard: React.FC = () => {
                     >
                       <defs>
                         <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#173F35" stopOpacity={0.4} />
-                          <stop offset="95%" stopColor="#173F35" stopOpacity={0.0} />
+                          <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.45} />
+                          <stop offset="95%" stopColor="#173F35" stopOpacity={0.02} />
                         </linearGradient>
                       </defs>
                       <XAxis dataKey="time" stroke="#737A75" fontSize={11} tickLine={false} />
@@ -737,7 +855,7 @@ export const AdminDashboard: React.FC = () => {
                           borderRadius: '12px',
                           borderColor: '#E5E0D8',
                           fontSize: '12px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                          boxShadow: '0 8px 24px rgba(23,63,53,0.1)',
                         }}
                       />
                       <Area
@@ -1056,8 +1174,8 @@ export const AdminDashboard: React.FC = () => {
                       Real vaqt rejimida oshxona va zal yangilanishlari
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <div className="flex items-center gap-1.5 text-xs text-[#1E5245] font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
                     <span>Jonli sinxronizatsiya</span>
                   </div>
                 </div>

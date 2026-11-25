@@ -192,6 +192,86 @@
         "is_active",
         "created_at"
       ]
+    },
+    "CustomerAccount": {
+      "title": "CustomerAccount",
+      "description": "Returning customer loyalty account with hashed phone ID, masked phone display, hashed PIN, and live cashback balance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "full_name": { "type": "string", "maxLength": 80 },
+        "phone_masked": { "type": "string", "maxLength": 30 },
+        "pin_hash": { "type": "string", "maxLength": 128 },
+        "cashback_balance": { "type": "number" },
+        "total_spent": { "type": "number" },
+        "total_orders": { "type": "number" },
+        "tier": { "type": "string", "enum": ["silver", "gold", "platinum"] },
+        "created_at": { "type": "string", "maxLength": 40 },
+        "updated_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "full_name",
+        "phone_masked",
+        "pin_hash",
+        "cashback_balance",
+        "total_spent",
+        "total_orders",
+        "tier",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "CashbackTransaction": {
+      "title": "CashbackTransaction",
+      "description": "Individual cashback earn, spend, refund, or welcome bonus ledger entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "account_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["earned", "spent", "refunded", "welcome_bonus"] },
+        "amount": { "type": "number" },
+        "order_id": { "type": "string", "maxLength": 128 },
+        "order_number": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 200 },
+        "created_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "account_id",
+        "type",
+        "amount",
+        "description",
+        "created_at"
+      ]
+    },
+    "StaffAccount": {
+      "title": "StaffAccount",
+      "description": "Staff portal account for Admin, Waiter, or Chef roles using Uzbekistan +998 phone hash ID, masked display phone, and hashed PIN.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["admin", "waiter", "kitchen"] },
+        "full_name": { "type": "string", "maxLength": 80 },
+        "phone_masked": { "type": "string", "maxLength": 30 },
+        "pin_hash": { "type": "string", "maxLength": 128 },
+        "badge_id": { "type": "string", "maxLength": 24 },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "assigned_tables": { "type": "array" },
+        "created_at": { "type": "string", "maxLength": 40 },
+        "updated_at": { "type": "string", "maxLength": 40 }
+      },
+      "required": [
+        "id",
+        "role",
+        "full_name",
+        "phone_masked",
+        "pin_hash",
+        "badge_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ]
     }
   },
   "firestore": {
@@ -222,6 +302,18 @@
     "/tables/{tableId}": {
       "schema": { "$ref": "#/entities/RestaurantTable" },
       "description": "Restaurant table registry."
+    },
+    "/customer_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/CustomerAccount" },
+      "description": "Returning customer loyalty accounts with cashback balance (zero raw PII; lookup by hashed ID only)."
+    },
+    "/customer_accounts/{accountId}/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/CashbackTransaction" },
+      "description": "Cashback transaction history belonging to a customer account."
+    },
+    "/staff_accounts/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffAccount" },
+      "description": "Staff accounts for Admin, Waiter, and Chef roles (zero raw PII; masked phone and hashed PIN)."
     }
   }
 }

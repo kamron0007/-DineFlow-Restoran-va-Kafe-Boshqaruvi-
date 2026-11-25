@@ -11,8 +11,7 @@ import {
   Sparkles,
   Send,
   Coffee,
-  Smile,
-  ShieldCheck,
+  Award,
 } from 'lucide-react';
 
 interface CustomerFeedbackModalProps {
@@ -49,7 +48,7 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
   onClose,
   onSubmitted,
 }) => {
-  const { submitOrderFeedback, restaurantName } = useApp();
+  const { submitOrderFeedback, restaurantName, restaurantRating } = useApp();
 
   const [overallRating, setOverallRating] = useState<number>(5);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
@@ -119,19 +118,17 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-lg w-full border border-[#E5E0D8] shadow-2xl overflow-hidden my-6 relative">
         {/* Modal Top Header */}
-        <div className="bg-[#173F35] text-white p-5 flex items-center justify-between relative overflow-hidden">
-          <div className="absolute top-0 right-0 -mr-6 -mt-6 w-28 h-28 rounded-full bg-white/5 pointer-events-none" />
-
+        <div className="bg-[#173F35] text-white px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center shadow-sm">
-              <Sparkles className="w-5 h-5 text-slate-950" />
+            <div className="w-10 h-10 rounded-2xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center shadow-sm">
+              <Sparkles className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-display font-extrabold text-base sm:text-lg leading-tight">
                 Xizmat Sifatini Baholash
               </h3>
-              <p className="text-xs text-emerald-200 mt-0.5">
-                Stol №{order.table_number} • {order.order_number} • {restaurantName || 'Zafaran Grand'}
+              <p className="text-xs text-emerald-100/80 mt-0.5">
+                Stol №{order.table_number} · {order.order_number} · {restaurantName || 'Zafaran Grand'}
               </p>
             </div>
           </div>
@@ -139,7 +136,7 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -148,29 +145,34 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
         {isSuccess ? (
           /* Thank You Celebration View */
           <div className="p-8 text-center space-y-4">
-            <div className="w-20 h-20 rounded-full bg-emerald-50 border-4 border-emerald-100 flex items-center justify-center mx-auto text-emerald-600 shadow-inner animate-bounce">
-              <CheckCircle2 className="w-10 h-10" />
+            <div className="w-20 h-20 rounded-full bg-[#E8F0EC] border-4 border-[#F59E0B]/30 flex items-center justify-center mx-auto text-[#173F35]">
+              <CheckCircle2 className="w-10 h-10 text-[#1E5245]" />
             </div>
 
             <div className="space-y-1.5">
               <h4 className="font-display font-extrabold text-xl text-[#173F35]">
                 Fikringiz Uchun Katta Rahmat!
               </h4>
-              <p className="text-xs text-[#737A75] max-w-sm mx-auto leading-relaxed">
-                Siz qoldirgan baho va izoh restoran boshqaruviga uzatildi. Sizning fikringiz xizmatlarimizni yanada yaxshilashga yordam beradi.
+              <p className="text-xs text-[#59635E] max-w-sm mx-auto leading-relaxed">
+                Siz qoldirgan baho restoran darajasini jonli yangiladi. Hozirgi maqom:{' '}
+                <strong className="text-[#173F35]">
+                  {restaurantRating.level.title} ({restaurantRating.averageRating.toFixed(1)} ★)
+                </strong>
+                .
               </p>
             </div>
 
             {selectedTip > 0 && (
               <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 inline-block font-medium">
-                🎁 Mas'ul ofitsiantga <strong className="font-bold">{selectedTip.toLocaleString()} so'm</strong> choypuli biriktirildi. Tashakkur!
+                Mas&apos;ul ofitsiantga <strong className="font-bold">{selectedTip.toLocaleString()} so&apos;m</strong> choypuli biriktirildi. Tashakkur!
               </div>
             )}
 
             <div className="pt-4">
               <button
+                type="button"
                 onClick={onClose}
-                className="py-3 px-8 rounded-xl bg-[#173F35] hover:bg-[#235B4E] text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                className="py-3 px-8 rounded-full bg-[#173F35] hover:bg-[#1E5245] text-white text-xs font-bold transition-all shadow-md active:scale-95"
               >
                 Yopish
               </button>
@@ -179,6 +181,19 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
         ) : (
           /* Rating Form */
           <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5 max-h-[78vh] overflow-y-auto">
+            {/* Live Restaurant Level Impact Strip */}
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl bg-[#E8F0EC] border border-[#F59E0B]/40 text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <Award className="w-4 h-4 text-[#173F35] shrink-0" />
+                <span className="text-[#173F35] font-bold truncate">
+                  Joriy daraja: {restaurantRating.level.title} ({restaurantRating.averageRating.toFixed(1)} ★)
+                </span>
+              </div>
+              <span className="text-[11px] text-[#59635E] shrink-0">
+                Bahoyingiz darajaga ta&apos;sir qiladi
+              </span>
+            </div>
+
             {/* Overall Star Rating Box */}
             <div className="bg-[#FAF8F3] p-4 sm:p-5 rounded-2xl border border-[#E5E0D8] text-center space-y-2">
               <span className="text-xs font-bold text-[#173F35] uppercase tracking-wider block">
@@ -415,11 +430,11 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
             </div>
 
             {/* Submit Action Buttons */}
-            <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#FAF8F3]">
+            <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#F2EFE9]">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl border border-[#E5E0D8] text-xs font-bold text-[#737A75] hover:bg-[#FAF8F3] transition-colors"
+                className="px-4 py-2.5 rounded-full border border-[#E5E0D8] text-xs font-bold text-[#59635E] hover:bg-[#FAF8F3] transition-colors"
               >
                 Keyinroq
               </button>
@@ -427,10 +442,10 @@ export const CustomerFeedbackModal: React.FC<CustomerFeedbackModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-6 py-2.5 rounded-xl bg-[#173F35] hover:bg-[#235B4E] text-white text-xs font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="px-6 py-2.5 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] text-[#173F35] text-xs font-extrabold shadow-sm active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Send className="w-3.5 h-3.5 text-amber-300" />
-                <span>{isSubmitting ? "Yuborilmoqda..." : "Bahoni Yuborish"}</span>
+                <Send className="w-3.5 h-3.5" />
+                <span>{isSubmitting ? 'Yuborilmoqda...' : 'Bahoni Yuborish'}</span>
               </button>
             </div>
           </form>

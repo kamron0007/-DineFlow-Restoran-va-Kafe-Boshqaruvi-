@@ -195,6 +195,63 @@ service cloud.firestore {
         && data.created_at is string && data.created_at.size() <= 40;
     }
 
+    function isValidCustomerAccount(data) {
+      return data.keys().hasAll([
+          'id', 'full_name', 'phone_masked', 'pin_hash',
+          'cashback_balance', 'total_spent', 'total_orders', 'tier',
+          'created_at', 'updated_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'full_name', 'phone_masked', 'pin_hash',
+          'cashback_balance', 'total_spent', 'total_orders', 'tier',
+          'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && data.full_name is string && data.full_name.size() >= 1 && data.full_name.size() <= 80
+        && data.phone_masked is string && data.phone_masked.size() >= 4 && data.phone_masked.size() <= 30
+        && data.pin_hash is string && data.pin_hash.size() >= 16 && data.pin_hash.size() <= 128
+        && data.cashback_balance is number && data.cashback_balance >= 0 && data.cashback_balance <= 50000000
+        && data.total_spent is number && data.total_spent >= 0 && data.total_spent <= 1000000000
+        && data.total_orders is number && data.total_orders >= 0 && data.total_orders <= 100000
+        && data.tier is string && data.tier in ['silver', 'gold', 'platinum']
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40
+        && data.updated_at is string && data.updated_at.size() >= 10 && data.updated_at.size() <= 40;
+    }
+
+    function isValidCashbackTx(data) {
+      return data.keys().hasAll(['id', 'account_id', 'type', 'amount', 'description', 'created_at'])
+        && data.keys().hasOnly(['id', 'account_id', 'type', 'amount', 'order_id', 'order_number', 'description', 'created_at'])
+        && isValidId(data.id)
+        && isValidId(data.account_id)
+        && data.type is string && data.type in ['earned', 'spent', 'refunded', 'welcome_bonus']
+        && data.amount is number && data.amount >= 0 && data.amount <= 50000000
+        && isOptionalString(data, 'order_id', 128)
+        && isOptionalString(data, 'order_number', 32)
+        && data.description is string && data.description.size() >= 1 && data.description.size() <= 200
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40;
+    }
+
+    function isValidStaffAccount(data) {
+      return data.keys().hasAll([
+          'id', 'role', 'full_name', 'phone_masked', 'pin_hash',
+          'badge_id', 'status', 'created_at', 'updated_at'
+        ])
+        && data.keys().hasOnly([
+          'id', 'role', 'full_name', 'phone_masked', 'pin_hash',
+          'badge_id', 'status', 'assigned_tables', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && data.role is string && data.role in ['admin', 'waiter', 'kitchen']
+        && data.full_name is string && data.full_name.size() >= 2 && data.full_name.size() <= 80
+        && data.phone_masked is string && data.phone_masked.size() >= 4 && data.phone_masked.size() <= 30
+        && data.pin_hash is string && data.pin_hash.size() >= 16 && data.pin_hash.size() <= 128
+        && data.badge_id is string && data.badge_id.size() >= 2 && data.badge_id.size() <= 24
+        && data.status is string && data.status in ['active', 'inactive']
+        && (!('assigned_tables' in data) || (data.assigned_tables is list && data.assigned_tables.size() <= 50 && (data.assigned_tables.size() == 0 || data.assigned_tables[0] is number)))
+        && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40
+        && data.updated_at is string && data.updated_at.size() >= 10 && data.updated_at.size() <= 40;
+    }
+
     // --- Startup Connection Health Check ---
     match /test/connection {
       allow get: if true;
@@ -337,6 +394,66 @@ service cloud.firestore {
         && isValidTable(incoming())
         && incoming().id == existing().id;
       allow delete: if isValidId(tableId);
+    }
+
+    // --- Customer Loyalty Accounts & Cashback Wallet (No public enumeration) ---
+    match /customer_accounts/{accountId} {
+      allow get: if isValidId(accountId);
+      allow list: if isAdmin();
+
+      allow create: if isValidId(accountId)
+        && isValidCustomerAccount(incoming())
+        && incoming().id == accountId
+        && incoming().cashback_balance <= 50000000;
+
+      allow update: if isValidId(accountId)
+        && isValidCustomerAccount(incoming())
+        && incoming().id == existing().id
+        && incoming().created_at == existing().created_at
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'full_name', 'phone_masked', 'pin_hash',
+            'cashback_balance', 'total_spent', 'total_orders', 'tier', 'updated_at'
+          ])
+        );
+
+      allow delete: if isAdmin();
+
+      match /transactions/{txId} {
+        allow get: if isValidId(accountId) && isValidId(txId);
+        allow list: if isValidId(accountId) && resource.data.account_id == accountId;
+
+        allow create: if isValidId(accountId)
+          && isValidId(txId)
+          && isValidCashbackTx(incoming())
+          && incoming().id == txId
+          && incoming().account_id == accountId
+          && exists(/databases/$(database)/documents/customer_accounts/$(accountId));
+
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // --- Staff Accounts (Admin, Waiter, Chef — Zero raw PII) ---
+    match /staff_accounts/{staffId} {
+      allow get: if isValidId(staffId);
+      allow list: if resource.data.role in ['admin', 'waiter', 'kitchen'];
+
+      allow create: if isValidId(staffId)
+        && isValidStaffAccount(incoming())
+        && incoming().id == staffId;
+
+      allow update: if isValidId(staffId)
+        && isValidStaffAccount(incoming())
+        && incoming().id == existing().id
+        && incoming().created_at == existing().created_at
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'role', 'full_name', 'phone_masked', 'pin_hash',
+          'badge_id', 'status', 'assigned_tables', 'updated_at'
+        ]);
+
+      allow delete: if isValidId(staffId);
     }
   }
 }

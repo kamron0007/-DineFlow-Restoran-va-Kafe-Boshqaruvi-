@@ -21,8 +21,11 @@ import {
   Sliders,
   Check,
   Zap,
+  Pencil,
+  UserPlus,
+  LogOut,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 export const KitchenDisplayPage: React.FC = () => {
   const {
@@ -31,11 +34,20 @@ export const KitchenDisplayPage: React.FC = () => {
     updateOrderStatus,
     soundEnabled,
     setSoundEnabled,
-    setUserRole,
     restaurantName,
     restaurantBranch,
     addToast,
+    activeStaffAccount,
+    staffAccounts,
+    openStaffAccountModal,
+    logoutStaffAccount,
   } = useApp();
+  const navigate = useNavigate();
+
+  const activeChefAccount =
+    (activeStaffAccount?.role === 'kitchen' ? activeStaffAccount : null) ||
+    staffAccounts.find((a) => a.role === 'kitchen') ||
+    null;
 
   const { timeString, dateString } = useLiveClock();
   const [completedItems, setCompletedItems] = useState<Record<string, boolean>>({});
@@ -190,108 +202,137 @@ export const KitchenDisplayPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-white flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col font-sans select-none">
       {/* Top KDS Header */}
-      <header className="h-16 px-4 sm:px-6 bg-[#1E293B] border-b border-gray-700/80 flex items-center justify-between shrink-0 shadow-md gap-3">
+      <header className="h-16 px-4 sm:px-6 bg-[#173F35] border-b border-white/10 flex items-center justify-between shrink-0 gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shadow-sm">
-            <ChefHat className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center font-bold shadow-[0_6px_18px_-6px_rgba(245,158,11,0.6)]">
+            <ChefHat className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-display font-black text-base sm:text-lg leading-none tracking-tight">
+              <h1 className="font-display font-extrabold text-base sm:text-lg leading-none tracking-tight">
                 {restaurantName || 'Zafaran Grand'} KDS
               </h1>
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md">
-                Oshxona Ekrani
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#F59E0B]">
+                · Oshxona Ekrani
               </span>
             </div>
-            <span className="text-xs text-gray-400 mt-0.5 block truncate max-w-[220px] sm:max-w-none">
-              {restaurantBranch || 'Toshkent filiali'} • Real vaqt rejimi
+            <span className="text-xs text-emerald-100/70 mt-0.5 block truncate max-w-[220px] sm:max-w-none">
+              {restaurantBranch || 'Toshkent filiali'} · Real vaqt rejimi
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
-          {/* Live Clock Widget */}
-          <div className="flex items-center gap-2.5 bg-gray-900 px-3 py-1.5 rounded-xl border border-gray-700 font-mono text-xs shadow-inner">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-            </span>
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden xl:inline text-gray-300 font-sans">{dateString}</span>
-            <span className="text-emerald-400/50 hidden xl:inline">•</span>
-            <span className="text-white font-extrabold text-xs sm:text-sm tabular-nums tracking-wider bg-black/50 px-2 py-0.5 rounded-lg border border-gray-600 shadow-inner">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap justify-end">
+          {/* Clean Live Clock Widget */}
+          <div className="flex items-center gap-2 bg-slate-900/90 px-3.5 py-1.5 rounded-full border border-white/12 font-mono text-xs">
+            <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
+            <span className="hidden xl:inline text-emerald-100/75 font-sans">{dateString}</span>
+            <span className="text-white/25 hidden xl:inline">·</span>
+            <span className="text-[#F59E0B] font-extrabold text-xs sm:text-sm tabular-nums tracking-wider">
               {timeString}
             </span>
           </div>
 
-          {/* Quick status counter pills */}
-          <div className="hidden lg:flex items-center gap-2.5 text-xs font-bold">
-            <span className="text-red-400 flex items-center gap-1.5 bg-red-950/40 px-2.5 py-1 rounded-lg border border-red-900/60">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          {/* Quick status counter summary */}
+          <div className="hidden lg:flex items-center gap-2 text-xs font-bold">
+            <span className="text-red-300 flex items-center gap-1.5 bg-red-950/50 px-3 py-1 rounded-full border border-red-800/60 font-mono tabular-nums">
+              <span className="w-2 h-2 rounded-full bg-red-500" />
               <span>Yangi: {rawNewOrders.length}</span>
             </span>
-            <span className="text-amber-400 flex items-center gap-1.5 bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-900/60">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span className="text-amber-300 flex items-center gap-1.5 bg-amber-950/45 px-3 py-1 rounded-full border border-amber-700/60 font-mono tabular-nums">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
               <span>Oshxonada: {rawPreparingOrders.length}</span>
             </span>
-            <span className="text-emerald-400 flex items-center gap-1.5 bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-900/60">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="text-[#F59E0B] flex items-center gap-1.5 bg-white/6 px-3 py-1 rounded-full border border-[#F59E0B]/30 font-mono tabular-nums">
+              <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
               <span>Tayyor: {rawReadyOrders.length}</span>
             </span>
           </div>
 
           {/* Critical Delay Alert Badge in Header if any order is delayed */}
           {totalDelayedCount > 0 && (
-            <div className="flex items-center gap-1.5 bg-red-600 text-white font-black text-xs px-3 py-1.5 rounded-xl animate-pulse shadow-md border border-red-400 ring-2 ring-red-500/50">
-              <AlertTriangle className="w-4 h-4 animate-bounce" />
+            <div className="flex items-center gap-1.5 bg-red-600 text-white font-black text-xs px-3 py-1.5 rounded-full animate-pulse shadow-md border border-red-400">
+              <AlertTriangle className="w-4 h-4" />
               <span>{totalDelayedCount} ta kechikmoqda!</span>
             </div>
           )}
 
           {/* Sound Toggle */}
           <button
+            type="button"
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className={`p-2 rounded-xl border transition-colors ${
+            className={`p-2 rounded-full border transition-colors ${
               soundEnabled
-                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/80 shadow-xs'
-                : 'bg-gray-800 text-gray-400 border-gray-600'
+                ? 'bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/40'
+                : 'bg-white/8 text-emerald-100/60 border-white/14'
             }`}
-            title={soundEnabled ? "Ovoz yoqilgan" : "Ovoz o'chirilgan"}
+            title={soundEnabled ? 'Ovoz yoqilgan' : "Ovoz o'chirilgan"}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
 
           {/* Fullscreen Toggle */}
           <button
+            type="button"
             onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-gray-800 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+            className="p-2 rounded-full bg-white/8 border border-white/14 text-emerald-100 hover:text-white hover:bg-white/15 transition-colors"
             title="To'liq ekranga o'tish"
           >
             <Maximize2 className="w-4 h-4" />
           </button>
 
-          {/* Quick link to Admin */}
+          {/* Chef Account Edit & Create */}
           <button
-            onClick={() => setUserRole('admin')}
-            className="text-xs font-bold text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-700 transition-colors"
+            type="button"
+            onClick={() => openStaffAccountModal(activeChefAccount, 'kitchen')}
+            className="text-xs font-bold text-[#173F35] bg-[#F59E0B] hover:bg-[#FBBF24] px-3.5 py-1.5 rounded-full flex items-center gap-1.5 transition-colors"
+            title="Oshpaz akkauntini tahrirlash"
           >
-            Admin Panel
+            <Pencil className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">
+              {activeChefAccount ? activeChefAccount.full_name.split(' ')[0] : 'Oshpaz'}
+            </span>
           </button>
 
-          <Link
-            to="/admin/kitchen-efficiency"
-            className="text-xs font-bold text-amber-400 hover:underline hidden sm:inline"
+          <button
+            type="button"
+            onClick={() => openStaffAccountModal(null, 'kitchen')}
+            className="p-2 rounded-full bg-white/8 border border-white/14 text-[#F59E0B] hover:text-white hover:bg-white/15 transition-colors"
+            title="Yangi oshpaz akkaunti yaratish"
           >
-            Samaradorlik
-          </Link>
+            <UserPlus className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              logoutStaffAccount();
+              navigate('/login?role=admin');
+            }}
+            className="text-xs font-semibold text-emerald-100 hover:text-white bg-white/8 hover:bg-white/15 px-3 py-1.5 rounded-full border border-white/14 transition-colors"
+          >
+            Admin
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              logoutStaffAccount();
+              navigate('/login?role=kitchen');
+            }}
+            className="text-xs font-bold text-red-200 hover:text-white bg-red-500/20 hover:bg-red-500/35 px-3 py-1.5 rounded-full border border-red-400/30 flex items-center gap-1.5 transition-colors"
+            title="Tizimdan chiqish"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Chiqish</span>
+          </button>
         </div>
       </header>
 
       {/* Visual Delay Warning & Filter Bar */}
-      <div className="bg-[#1E293B]/90 border-b border-gray-700 px-4 py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+      <div className="bg-[#062832] border-b border-white/10 px-4 sm:px-6 py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
         {/* Left: Delay Alert Notice */}
         <div className="flex items-center gap-2.5 flex-wrap w-full md:w-auto">
           {totalDelayedCount > 0 ? (

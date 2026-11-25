@@ -13,8 +13,19 @@ import {
   CustomerFeedback,
   DishReview,
   RestaurantRatingSummary,
+  CustomerAccount,
+  CashbackTransaction,
+  CustomerSessionMode,
+  StaffAccount,
+  StaffAccountRole,
 } from '../types';
 import { dataService } from '../services/storage';
+import {
+  CASHBACK_RATE,
+  customerAccountService,
+} from '../services/customerAccount';
+import { staffAccountService, STAFF_ROLE_LABELS } from '../services/staffAccount';
+import { computeRestaurantLevel } from '../utils/restaurantLevel';
 import { INITIAL_PROFILES } from '../services/seedData';
 import { soundService } from '../services/sound';
 import confetti from 'canvas-confetti';
@@ -114,12 +125,65 @@ interface AppContextType {
 
   // Actions
   refreshData: () => Promise<void>;
-  placeOrder: (customerNote?: string) => Promise<Order>;
+  placeOrder: (customerNote?: string, options?: { useCashbackAmount?: number }) => Promise<Order>;
+  cancelCustomerOrder: (orderId: string) => Promise<{ ok: boolean; reason?: string }>;
   callWaiter: (note?: string) => Promise<void>;
   requestBill: () => Promise<void>;
   resolveServiceCall: (callId: string) => Promise<void>;
   updateOrderStatus: (orderId: string, status: Order['status']) => Promise<void>;
   settleAndFreeTable: (tableNumber: number) => Promise<void>;
+
+  // Customer Personal Cabinet & Cashback Loyalty
+  customerAccount: CustomerAccount | null;
+  customerTransactions: CashbackTransaction[];
+  customerSessionMode: CustomerSessionMode;
+  isCustomerAuthOpen: boolean;
+  customerAuthInitialView: 'choice' | 'login' | 'register';
+  openCustomerAuth: (view?: 'choice' | 'login' | 'register') => void;
+  closeCustomerAuth: () => void;
+  registerCustomerAccount: (fullName: string, phone: string, pin: string) => Promise<CustomerAccount>;
+  loginCustomerAccount: (phone: string, pin: string) => Promise<CustomerAccount>;
+  updateCustomerAccount: (params: {
+    fullName: string;
+    newPhone?: string;
+    currentPin?: string;
+    newPin?: string;
+  }) => Promise<CustomerAccount>;
+  continueAsGuest: () => void;
+  logoutCustomerAccount: () => void;
+
+  // Staff Accounts (Admin, Waiter, Chef) — Create, Login & Edit
+  staffAccounts: StaffAccount[];
+  activeStaffAccount: StaffAccount | null;
+  isStaffAccountsLoaded: boolean;
+  isStaffAccountModalOpen: boolean;
+  editingStaffAccount: StaffAccount | null;
+  staffModalDefaultRole: StaffAccountRole;
+  openStaffAccountModal: (account?: StaffAccount | null, defaultRole?: StaffAccountRole) => void;
+  closeStaffAccountModal: () => void;
+  registerStaffAccount: (params: {
+    role: StaffAccountRole;
+    fullName: string;
+    phone: string;
+    pin: string;
+    badgeId?: string;
+    assignedTables?: number[];
+  }) => Promise<StaffAccount>;
+  loginStaffAccount: (role: StaffAccountRole, phone: string, pin: string) => Promise<StaffAccount>;
+  updateStaffAccount: (
+    accountId: string,
+    params: {
+      fullName: string;
+      role: StaffAccountRole;
+      phone?: string;
+      newPin?: string;
+      badgeId?: string;
+      status?: 'active' | 'inactive';
+      assignedTables?: number[];
+    }
+  ) => Promise<StaffAccount>;
+  deleteStaffAccount: (accountId: string) => Promise<void>;
+  logoutStaffAccount: () => void;
 
   // Restaurant Info & Branding
   restaurantName: string;
@@ -208,6 +272,232 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(soundService.isEnabled());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [lastResolvedCall, setLastResolvedCall] = useState<ResolvedCallStatus | null>(null);
+
+  // Customer Personal Cabinet & Cashback Loyalty State
+  const [customerAccount, setCustomerAccount] = useState<CustomerAccount | null>(() =>
+    customerAccountService.getCachedActiveAccount()
+  );
+  const [customerTransactions, setCustomerTransactions] = useState<CashbackTransaction[]>([]);
+  const [customerSessionMode, setCustomerSessionMode] = useState<CustomerSessionMode>(() =>
+    customerAccountService.getSavedSessionMode()
+  );
+  const [isCustomerAuthOpen, setIsCustomerAuthOpen] = useState<boolean>(false);
+  const [customerAuthInitialView, setCustomerAuthInitialView] = useState<'choice' | 'login' | 'register'>('choice');
+
+  useEffect(() => {
+    let active = true;
+    customerAccountService.loadActiveAccount().then(({ account, transactions }) => {
+      if (!active) return;
+      if (account) {
+        setCustomerAccount(account);
+        setCustomerTransactions(transactions);
+        setCustomerSessionMode('account');
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const openCustomerAuth = useCallback((view: 'choice' | 'login' | 'register' = 'choice') => {
+    setCustomerAuthInitialView(view);
+    setIsCustomerAuthOpen(true);
+  }, []);
+
+  const closeCustomerAuth = useCallback(() => {
+    setIsCustomerAuthOpen(false);
+  }, []);
+
+  const registerCustomerAccount = useCallback(async (fullName: string, phone: string, pin: string) => {
+    const { account, transactions } = await customerAccountService.registerAccount({
+      fullName,
+      phone,
+      pin,
+    });
+    setCustomerAccount(account);
+    setCustomerTransactions(transactions);
+    setCustomerSessionMode('account');
+    setIsCustomerAuthOpen(false);
+    soundService.playSuccess();
+    return account;
+  }, []);
+
+  const loginCustomerAccount = useCallback(async (phone: string, pin: string) => {
+    const { account, transactions } = await customerAccountService.loginAccount({
+      phone,
+      pin,
+    });
+    setCustomerAccount(account);
+    setCustomerTransactions(transactions);
+    setCustomerSessionMode('account');
+    setIsCustomerAuthOpen(false);
+    soundService.playSuccess();
+    return account;
+  }, []);
+
+  const continueAsGuest = useCallback(() => {
+    customerAccountService.setGuestSession();
+    setCustomerAccount(null);
+    setCustomerTransactions([]);
+    setCustomerSessionMode('guest');
+    setIsCustomerAuthOpen(false);
+  }, []);
+
+  const logoutCustomerAccount = useCallback(() => {
+    customerAccountService.clearSession();
+    setCustomerAccount(null);
+    setCustomerTransactions([]);
+    setCustomerSessionMode('guest');
+    soundService.playTick();
+  }, []);
+
+  // Staff Accounts (Admin, Waiter, Chef) State
+  const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>(() =>
+    staffAccountService.getCachedStaffAccounts()
+  );
+  const [activeStaffAccount, setActiveStaffAccount] = useState<StaffAccount | null>(() =>
+    staffAccountService.getActiveStaffAccount()
+  );
+  const [isStaffAccountsLoaded, setIsStaffAccountsLoaded] = useState<boolean>(false);
+  const [isStaffAccountModalOpen, setIsStaffAccountModalOpen] = useState<boolean>(false);
+  const [editingStaffAccount, setEditingStaffAccount] = useState<StaffAccount | null>(null);
+  const [staffModalDefaultRole, setStaffModalDefaultRole] = useState<StaffAccountRole>('admin');
+
+  useEffect(() => {
+    let active = true;
+    staffAccountService
+      .ensureSeeded()
+      .then((list) => {
+        if (!active) return;
+        setStaffAccounts(list);
+        const current = staffAccountService.getActiveStaffAccount();
+        if (current) {
+          const refreshed = list.find((a) => a.id === current.id && a.status === 'active') || null;
+          setActiveStaffAccount(refreshed);
+          if (refreshed) {
+            setUserRoleState(refreshed.role);
+            setCurrentUser({
+              id: refreshed.id,
+              full_name: refreshed.full_name,
+              role: refreshed.role,
+              created_at: refreshed.created_at,
+            });
+          } else {
+            staffAccountService.setActiveStaffAccountId(null);
+          }
+        }
+      })
+      .finally(() => {
+        if (active) setIsStaffAccountsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const openStaffAccountModal = useCallback(
+    (account: StaffAccount | null = null, defaultRole: StaffAccountRole = 'admin') => {
+      setEditingStaffAccount(account);
+      setStaffModalDefaultRole(account ? account.role : defaultRole);
+      setIsStaffAccountModalOpen(true);
+    },
+    []
+  );
+
+  const closeStaffAccountModal = useCallback(() => {
+    setIsStaffAccountModalOpen(false);
+    setEditingStaffAccount(null);
+  }, []);
+
+  const registerStaffAccount = useCallback(
+    async (params: {
+      role: StaffAccountRole;
+      fullName: string;
+      phone: string;
+      pin: string;
+      badgeId?: string;
+      assignedTables?: number[];
+    }): Promise<StaffAccount> => {
+      const created = await staffAccountService.registerStaffAccount(params);
+      setStaffAccounts((prev) => [created, ...prev.filter((a) => a.id !== created.id)]);
+      soundService.playSuccess();
+      return created;
+    },
+    []
+  );
+
+  const loginStaffAccount = useCallback(
+    async (role: StaffAccountRole, phone: string, pin: string): Promise<StaffAccount> => {
+      const acc = await staffAccountService.loginStaffAccount({ role, phone, pin });
+      setActiveStaffAccount(acc);
+      setStaffAccounts((prev) => {
+        const exists = prev.some((a) => a.id === acc.id);
+        return exists ? prev.map((a) => (a.id === acc.id ? acc : a)) : [acc, ...prev];
+      });
+      setUserRoleState(acc.role);
+      setCurrentUser({
+        id: acc.id,
+        full_name: acc.full_name,
+        role: acc.role,
+        created_at: acc.created_at,
+      });
+      soundService.playSuccess();
+      return acc;
+    },
+    []
+  );
+
+  const updateStaffAccount = useCallback(
+    async (
+      accountId: string,
+      params: {
+        fullName: string;
+        role: StaffAccountRole;
+        phone?: string;
+        newPin?: string;
+        badgeId?: string;
+        status?: 'active' | 'inactive';
+        assignedTables?: number[];
+      }
+    ): Promise<StaffAccount> => {
+      const updated = await staffAccountService.updateStaffAccount(accountId, params);
+      setStaffAccounts((prev) => [
+        updated,
+        ...prev.filter((a) => a.id !== accountId && a.id !== updated.id),
+      ]);
+      setActiveStaffAccount((prev) => {
+        if (prev && (prev.id === accountId || prev.id === updated.id)) {
+          setCurrentUser({
+            id: updated.id,
+            full_name: updated.full_name,
+            role: updated.role,
+            created_at: updated.created_at,
+          });
+          return updated;
+        }
+        return prev;
+      });
+      soundService.playSuccess();
+      return updated;
+    },
+    []
+  );
+
+  const deleteStaffAccount = useCallback(async (accountId: string): Promise<void> => {
+    const existing = staffAccountService.getCachedStaffAccounts().find((a) => a.id === accountId);
+    await staffAccountService.deleteStaffAccount(accountId);
+    setStaffAccounts((prev) => prev.filter((a) => a.id !== accountId));
+    setActiveStaffAccount((prev) => (prev?.id === accountId ? null : prev));
+    if (existing) {
+      soundService.playTick();
+    }
+  }, []);
+
+  const logoutStaffAccount = useCallback(() => {
+    staffAccountService.setActiveStaffAccountId(null);
+    setActiveStaffAccount(null);
+    soundService.playTick();
+  }, []);
 
   const dismissResolvedCall = useCallback(() => {
     setLastResolvedCall(null);
@@ -302,7 +592,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           path.startsWith('/table/') ||
           path.startsWith('/menu') ||
           path.startsWith('/cart') ||
-          path.startsWith('/orders');
+          path.startsWith('/orders') ||
+          path.startsWith('/account');
         if (isCustomerScreen && type !== 'waiter_response') {
           return;
         }
@@ -905,30 +1196,175 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return cart.reduce((acc, it) => acc + it.quantity, 0);
   }, [cart]);
 
-  // Instant Order Placement (< 5ms)
-  const placeOrder = useCallback(async (customerNote?: string): Promise<Order> => {
-    if (cart.length === 0) {
-      throw new Error("Savatingiz bo'sh");
-    }
-    try {
-      const order = await dataService.createOrder({
-        tableNumber: activeTableNumber,
-        cartItems: cart,
-        customerNote,
-      });
+  // Instant Order Placement (< 5ms) with optional Cashback redemption (2% cashback is credited ONLY upon delivery)
+  const placeOrder = useCallback(
+    async (customerNote?: string, options?: { useCashbackAmount?: number }): Promise<Order> => {
+      if (cart.length === 0) {
+        throw new Error("Savatingiz bo'sh");
+      }
+      try {
+        const subtotal = cart.reduce((acc, it) => acc + it.menuItem.price * it.quantity, 0);
+        const requestedCashback = options?.useCashbackAmount || 0;
+        const safeCashbackUsed = customerAccount
+          ? Math.min(customerAccount.cashback_balance, subtotal, Math.max(0, Math.round(requestedCashback)))
+          : 0;
+        const payableAmount = Math.max(0, subtotal - safeCashbackUsed);
+        const expectedCashbackEarned = customerAccount
+          ? Math.round(payableAmount * CASHBACK_RATE)
+          : 0;
 
-      // Immediately update local React state without waiting for network poll
-      setOrders((prev) => [order, ...prev.filter((o) => o.id !== order.id)]);
-      clearCart();
+        const order = await dataService.createOrder({
+          tableNumber: activeTableNumber,
+          cartItems: cart,
+          customerNote,
+          cashbackUsed: safeCashbackUsed,
+          cashbackEarned: expectedCashbackEarned,
+          customerAccountId: customerAccount?.id,
+          customerName: customerAccount?.full_name,
+        });
 
-      // NOTE: Do NOT show an order toast on the customer screen.
-      // New order notification is dispatched strictly to the Waiter screen (/waiter).
+        // Deduct ONLY spent cashback at order creation; 2% cashback is credited strictly when status === 'delivered'
+        if (customerAccount) {
+          const loyaltyResult = await customerAccountService.reserveOrderCashbackUsage(customerAccount, {
+            orderId: order.id,
+            orderNumber: order.order_number,
+            subtotalAmount: order.subtotal_amount ?? subtotal,
+            cashbackUsed: safeCashbackUsed,
+          });
+          setCustomerAccount(loyaltyResult.account);
+          setCustomerTransactions(loyaltyResult.transactions);
+        }
+
+        // Immediately update local React state without waiting for network poll
+        setOrders((prev) => [order, ...prev.filter((o) => o.id !== order.id)]);
+        clearCart();
+
+        // NOTE: Do NOT show an order toast on the customer screen.
+        // New order notification is dispatched strictly to the Waiter screen (/waiter).
+        refreshData();
+        return order;
+      } catch (err: unknown) {
+        throw err;
+      }
+    },
+    [cart, activeTableNumber, customerAccount, clearCart, refreshData]
+  );
+
+  // Cancel order strictly while it has 1 tick (status === 'new') before waiter acceptance
+  // Cancelled orders NEVER earn cashback; any spent cashback is refunded.
+  const cancelCustomerOrder = useCallback(
+    async (orderId: string): Promise<{ ok: boolean; reason?: string }> => {
+      const result = await dataService.cancelOrder(orderId);
+      if (!result.ok || !result.order) {
+        return { ok: false, reason: result.reason || 'already_accepted' };
+      }
+
+      const cancelledOrder = result.order;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? { ...o, status: 'cancelled', cashback_earned: 0, updated_at: cancelledOrder.updated_at }
+            : o
+        )
+      );
+
+      if (customerAccount && cancelledOrder.customer_account_id === customerAccount.id) {
+        const refunded = await customerAccountService.refundCancelledOrderCashback(customerAccount, {
+          orderId: cancelledOrder.id,
+          orderNumber: cancelledOrder.order_number,
+          cashbackUsed: cancelledOrder.cashback_used || 0,
+        });
+        setCustomerAccount(refunded.account);
+        setCustomerTransactions(refunded.transactions);
+      }
+
       refreshData();
-      return order;
-    } catch (err: unknown) {
-      throw err;
-    }
-  }, [cart, activeTableNumber, clearCart, refreshData]);
+      return { ok: true };
+    },
+    [customerAccount, refreshData]
+  );
+
+  // Idempotent cross-device Cashback Reconciliation:
+  // - Credits 2% cashback ONLY when an order reaches 'delivered'
+  // - Refunds spent cashback (with ZERO earned cashback) if staff/customer cancels an order
+  const reconciledCashbackKeysRef = React.useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!customerAccount || orders.length === 0) return;
+
+    const myOrders = orders.filter((o) => o.customer_account_id === customerAccount.id);
+    if (myOrders.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      let latestAccount = customerAccount;
+      let latestTransactions = customerTransactions;
+      let didUpdate = false;
+
+      for (const ord of myOrders) {
+        if (ord.status === 'delivered') {
+          const earnKey = `earn:${latestAccount.id}:${ord.id}`;
+          if (reconciledCashbackKeysRef.current.has(earnKey)) continue;
+          reconciledCashbackKeysRef.current.add(earnKey);
+
+          const res = await customerAccountService.creditDeliveredOrderCashback(latestAccount, {
+            orderId: ord.id,
+            orderNumber: ord.order_number,
+            payableAmount: ord.total_amount,
+          });
+          if (res.creditedAmount > 0) {
+            latestAccount = res.account;
+            latestTransactions = res.transactions;
+            didUpdate = true;
+          }
+        } else if (ord.status === 'cancelled' && (ord.cashback_used || 0) > 0) {
+          const refundKey = `refund:${latestAccount.id}:${ord.id}`;
+          if (reconciledCashbackKeysRef.current.has(refundKey)) continue;
+          reconciledCashbackKeysRef.current.add(refundKey);
+
+          const res = await customerAccountService.refundCancelledOrderCashback(latestAccount, {
+            orderId: ord.id,
+            orderNumber: ord.order_number,
+            cashbackUsed: ord.cashback_used || 0,
+          });
+          if (res.refundedAmount > 0) {
+            latestAccount = res.account;
+            latestTransactions = res.transactions;
+            didUpdate = true;
+          }
+        }
+      }
+
+      if (!cancelled && didUpdate) {
+        setCustomerAccount(latestAccount);
+        setCustomerTransactions(latestTransactions);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customerAccount?.id, orders]);
+
+  const updateCustomerAccount = useCallback(
+    async (params: {
+      fullName: string;
+      newPhone?: string;
+      currentPin?: string;
+      newPin?: string;
+    }): Promise<CustomerAccount> => {
+      if (!customerAccount) {
+        throw new Error("Tahrirlash uchun avval shaxsiy kabinetingizga kiring.");
+      }
+      const { account, transactions } = await customerAccountService.updateAccount(customerAccount, params);
+      setCustomerAccount(account);
+      setCustomerTransactions(transactions);
+      soundService.playSuccess();
+      refreshData();
+      return account;
+    },
+    [customerAccount, refreshData]
+  );
 
   // Table Service Actions (Waiter notifications — allowed on Customer screen)
   const callWaiter = useCallback(async (note?: string) => {
@@ -1109,6 +1545,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dishReviewsCount: dishReviews.length,
       orderReviewsCount: feedbacks.length,
       distribution,
+      level: computeRestaurantLevel(avg, total, feedbacks),
     };
   }, [dishReviews, feedbacks]);
 
@@ -1215,11 +1652,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSoundEnabled,
       refreshData,
       placeOrder,
+      cancelCustomerOrder,
       callWaiter,
       requestBill,
       resolveServiceCall,
       updateOrderStatus,
       settleAndFreeTable,
+      customerAccount,
+      customerTransactions,
+      customerSessionMode,
+      isCustomerAuthOpen,
+      customerAuthInitialView,
+      openCustomerAuth,
+      closeCustomerAuth,
+      registerCustomerAccount,
+      loginCustomerAccount,
+      updateCustomerAccount,
+      continueAsGuest,
+      logoutCustomerAccount,
+      staffAccounts,
+      activeStaffAccount,
+      isStaffAccountsLoaded,
+      isStaffAccountModalOpen,
+      editingStaffAccount,
+      staffModalDefaultRole,
+      openStaffAccountModal,
+      closeStaffAccountModal,
+      registerStaffAccount,
+      loginStaffAccount,
+      updateStaffAccount,
+      deleteStaffAccount,
+      logoutStaffAccount,
       restaurantName,
       setRestaurantName,
       restaurantBranch,
@@ -1271,11 +1734,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSoundEnabled,
       refreshData,
       placeOrder,
+      cancelCustomerOrder,
       callWaiter,
       requestBill,
       resolveServiceCall,
       updateOrderStatus,
       settleAndFreeTable,
+      customerAccount,
+      customerTransactions,
+      customerSessionMode,
+      isCustomerAuthOpen,
+      customerAuthInitialView,
+      openCustomerAuth,
+      closeCustomerAuth,
+      registerCustomerAccount,
+      loginCustomerAccount,
+      updateCustomerAccount,
+      continueAsGuest,
+      logoutCustomerAccount,
+      staffAccounts,
+      activeStaffAccount,
+      isStaffAccountsLoaded,
+      isStaffAccountModalOpen,
+      editingStaffAccount,
+      staffModalDefaultRole,
+      openStaffAccountModal,
+      closeStaffAccountModal,
+      registerStaffAccount,
+      loginStaffAccount,
+      updateStaffAccount,
+      deleteStaffAccount,
+      logoutStaffAccount,
       restaurantName,
       setRestaurantName,
       restaurantBranch,

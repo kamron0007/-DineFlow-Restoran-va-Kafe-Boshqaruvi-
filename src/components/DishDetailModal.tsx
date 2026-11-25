@@ -544,24 +544,24 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
         {activeTab === 'order' && (
           <div className="px-5 py-4 border-t border-[#E5E0D8] bg-white flex items-center gap-3 shrink-0">
             {/* Quantity Stepper */}
-            <div className="flex items-center gap-1.5 bg-[#FAF8F3] border border-[#E5E0D8] rounded-xl p-1 shrink-0">
+            <div className="flex items-center gap-1.5 bg-[#FAF8F3] border border-[#E5E0D8] rounded-full p-1 shrink-0">
               <button
                 type="button"
                 onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                 aria-label="Kamaytirish"
-                className="w-10 h-10 rounded-lg bg-white text-[#173F35] shadow-xs flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all disabled:opacity-40"
+                className="w-10 h-10 rounded-full bg-white text-[#173F35] border border-[#E5E0D8] flex items-center justify-center hover:bg-[#F3EFE6] active:scale-95 transition-all disabled:opacity-40"
                 disabled={quantity <= 1}
               >
                 <Minus className="w-4 h-4" />
               </button>
-              <span className="w-7 text-center text-sm font-bold font-display tabular-nums">
+              <span className="w-7 text-center text-sm font-extrabold font-mono text-[#202622] tabular-nums">
                 {quantity}
               </span>
               <button
                 type="button"
                 onClick={() => setQuantity((q) => q + 1)}
                 aria-label="Ko'paytirish"
-                className="w-10 h-10 rounded-lg bg-[#173F35] text-white shadow-xs flex items-center justify-center hover:bg-[#235B4E] active:scale-95 transition-all"
+                className="w-10 h-10 rounded-full bg-[#173F35] text-[#F59E0B] flex items-center justify-center hover:bg-[#1E5245] active:scale-95 transition-all"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -572,15 +572,15 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
               type="button"
               onClick={handleAddToCart}
               disabled={!dish.is_available}
-              className={`flex-1 min-h-[48px] py-3 px-4 rounded-xl font-display font-semibold text-sm flex items-center justify-center gap-2 shadow-sm transition-all whitespace-nowrap ${
+              className={`flex-1 min-h-[48px] py-3 px-5 rounded-full font-display font-extrabold text-sm flex items-center justify-center gap-2 transition-all whitespace-nowrap ${
                 dish.is_available
-                  ? 'bg-[#173F35] text-white hover:bg-[#235B4E] active:scale-[0.98]'
+                  ? 'bg-[#F59E0B] text-[#173F35] hover:bg-[#FBBF24] shadow-[0_10px_24px_-8px_rgba(245,158,11,0.65)] active:scale-[0.98]'
                   : 'bg-slate-200 text-slate-500 cursor-not-allowed'
               }`}
             >
               <ShoppingBag className="w-4 h-4 shrink-0" />
-              <span>Savatga qo'shish</span>
-              <span className="text-xs opacity-90 tabular-nums">· {formatUZS(totalPrice)}</span>
+              <span>Savatga qo&apos;shish</span>
+              <span className="text-xs font-mono font-bold tabular-nums">· {formatUZS(totalPrice)}</span>
             </button>
           </div>
         )}

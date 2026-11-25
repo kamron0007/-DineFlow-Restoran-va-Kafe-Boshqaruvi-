@@ -46,7 +46,7 @@ try {
 
 export interface RealtimeEventData {
   type: 'orders' | 'tables' | 'menu' | 'service' | 'waiters' | 'reviews';
-  action?: 'order_status_changed' | 'order_created' | 'service_call_created' | 'service_call_resolved' | 'table_settled_and_freed' | 'dish_review_added';
+  action?: 'order_status_changed' | 'order_created' | 'order_cancelled' | 'service_call_created' | 'service_call_resolved' | 'table_settled_and_freed' | 'dish_review_added';
   orderId?: string;
   orderNumber?: string;
   tableNumber?: number;
@@ -195,11 +195,22 @@ class DataService {
       const localOrders: Order[] = rawLocal ? JSON.parse(rawLocal) : [];
 
       const remoteMap = new Map(remoteOrders.map((o) => [o.id, o]));
-      // Keep recent local mutations intact if server hasn't caught up yet
+      // Keep recent local mutations intact if server hasn't caught up yet,
+      // and preserve local loyalty metadata fields not stored in Supabase schema.
       const mergedRemote = remoteOrders.map((ro) => {
+        const localMatch = localOrders.find((lo) => lo.id === ro.id);
         if (this.wasRecentlyMutated(ro.id)) {
-          const localMatch = localOrders.find((lo) => lo.id === ro.id);
           return localMatch || ro;
+        }
+        if (localMatch) {
+          return {
+            ...ro,
+            subtotal_amount: localMatch.subtotal_amount ?? ro.subtotal_amount,
+            cashback_used: localMatch.cashback_used ?? ro.cashback_used,
+            cashback_earned: localMatch.cashback_earned ?? ro.cashback_earned,
+            customer_account_id: localMatch.customer_account_id ?? ro.customer_account_id,
+            customer_name: localMatch.customer_name ?? ro.customer_name,
+          };
         }
         return ro;
       });
@@ -425,8 +436,20 @@ class DataService {
     tableNumber: number;
     cartItems: CartItem[];
     customerNote?: string;
+    cashbackUsed?: number;
+    cashbackEarned?: number;
+    customerAccountId?: string;
+    customerName?: string;
   }): Promise<Order> {
-    const { tableNumber, cartItems, customerNote } = params;
+    const {
+      tableNumber,
+      cartItems,
+      customerNote,
+      cashbackUsed = 0,
+      cashbackEarned = 0,
+      customerAccountId,
+      customerName,
+    } = params;
 
     const rawTables = localStorage.getItem(STORAGE_KEYS.TABLES);
     const allTables: RestaurantTable[] = rawTables ? JSON.parse(rawTables) : INITIAL_TABLES;
@@ -463,13 +486,22 @@ class DataService {
       };
     });
 
+    const safeCashbackUsed = Math.min(calculatedTotal, Math.max(0, Math.round(cashbackUsed)));
+    const safeCashbackEarned = Math.max(0, Math.round(cashbackEarned));
+    const finalPayableTotal = Math.max(0, calculatedTotal - safeCashbackUsed);
+
     const newOrder: Order = {
       id: orderId,
       order_number: orderNumber,
       table_id: table.id,
       table_number: table.table_number,
       status: 'new',
-      total_amount: calculatedTotal,
+      subtotal_amount: calculatedTotal,
+      cashback_used: safeCashbackUsed,
+      cashback_earned: safeCashbackEarned,
+      customer_account_id: customerAccountId,
+      customer_name: customerName,
+      total_amount: finalPayableTotal,
       customer_note: customerNote || '',
       waiter_name: table.assigned_waiter_name || "Mas'ul ofitsiant",
       items: orderItems,
@@ -493,8 +525,16 @@ class DataService {
       itemsCount: newOrder.items.length,
     });
 
-    // Non-blocking background write to Supabase
+    // Non-blocking background write to Supabase (strictly valid schema columns only)
     if (isSupabaseConfigured() && supabase) {
+      const loyaltyTagParts: string[] = [];
+      if (customerName) loyaltyTagParts.push(`Mijoz: ${customerName}`);
+      if (safeCashbackUsed > 0) {
+        loyaltyTagParts.push(`Keshbek: -${safeCashbackUsed.toLocaleString('uz-UZ')} so'm`);
+      }
+      const loyaltyTag = loyaltyTagParts.length > 0 ? `[${loyaltyTagParts.join(' · ')}]` : '';
+      const supabaseCustomerNote = [loyaltyTag, newOrder.customer_note].filter(Boolean).join(' ').trim();
+
       const orderPayload = {
         id: newOrder.id,
         order_number: newOrder.order_number,
@@ -502,7 +542,7 @@ class DataService {
         table_number: newOrder.table_number,
         status: newOrder.status,
         total_amount: newOrder.total_amount,
-        customer_note: newOrder.customer_note,
+        customer_note: supabaseCustomerNote,
         waiter_name: newOrder.waiter_name,
         waiter_called: false,
         bill_requested: false,
@@ -553,6 +593,9 @@ class DataService {
 
     if (target) {
       target.status = newStatus;
+      if (newStatus === 'cancelled') {
+        target.cashback_earned = 0;
+      }
       target.updated_at = now;
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
     }
@@ -583,6 +626,53 @@ class DataService {
     }
 
     return target || null;
+  }
+
+  // Strictly cancel order ONLY while it is in 'new' (1-tick) status before waiter accepts it
+  public async cancelOrder(orderId: string): Promise<{
+    ok: boolean;
+    order?: Order;
+    reason?: 'not_found' | 'already_accepted';
+  }> {
+    const rawOrders = localStorage.getItem(STORAGE_KEYS.ORDERS);
+    const currentOrders: Order[] = rawOrders ? JSON.parse(rawOrders) : INITIAL_ORDERS;
+    const target = currentOrders.find((o) => o.id === orderId);
+
+    if (!target) {
+      return { ok: false, reason: 'not_found' };
+    }
+
+    if (target.status !== 'new') {
+      return { ok: false, reason: 'already_accepted', order: { ...target } };
+    }
+
+    this.markMutated(orderId);
+    const now = new Date().toISOString();
+    target.status = 'cancelled';
+    target.cashback_earned = 0;
+    target.updated_at = now;
+    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
+
+    soundService.playTick();
+    emitRealtimeEvent('orders', {
+      action: 'order_cancelled',
+      orderId,
+      orderNumber: target.order_number,
+      tableNumber: target.table_number,
+      newStatus: 'cancelled',
+    });
+
+    if (isSupabaseConfigured() && supabase) {
+      supabase
+        .from('orders')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('id', orderId)
+        .then(({ error }) => {
+          if (error) console.error('Supabase cancelOrder error:', error.message);
+        });
+    }
+
+    return { ok: true, order: { ...target } };
   }
 
   // --- SERVICE CALLS ---
