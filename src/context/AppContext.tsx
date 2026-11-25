@@ -119,9 +119,11 @@ interface AppContextType {
   serviceCalls: ServiceCall[];
   isLoading: boolean;
 
-  // Sound
+  // Sound & Browser Notifications
   soundEnabled: boolean;
   setSoundEnabled: (val: boolean) => void;
+  audioUnlocked: boolean;
+  unlockAudio: (playTestChime?: boolean) => Promise<boolean>;
 
   // Actions
   refreshData: () => Promise<void>;
@@ -221,7 +223,7 @@ interface AppContextType {
   toasts: ToastMessage[];
   addToast: (type: ToastMessage['type'], title: string, message?: string, meta?: ToastMeta) => void;
   removeToast: (id: string) => void;
-  simulateWaiterNotification: (type: 'kitchen_ready' | 'customer_call') => void;
+  simulateWaiterNotification: (type: 'new_order' | 'kitchen_ready' | 'customer_call') => void;
   lastResolvedCall: ResolvedCallStatus | null;
   dismissResolvedCall: () => void;
 }
@@ -577,9 +579,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(TABLE_STORAGE_KEY, num.toString());
   }, []);
 
+  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(() => soundService.isAudioUnlocked());
+
+  useEffect(() => {
+    return soundService.subscribeAudioState((unlocked) => {
+      setAudioUnlocked(unlocked);
+    });
+  }, []);
+
+  const unlockAudio = useCallback(async (playTestChime: boolean = false): Promise<boolean> => {
+    const ok = await soundService.unlockAudio();
+    setAudioUnlocked(ok);
+    if (ok && playTestChime) {
+      soundService.playNewOrderChime();
+    }
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
+    } catch {
+      // Ignore Notification permission errors
+    }
+    return ok;
+  }, []);
+
   const setSoundEnabled = useCallback((enabled: boolean) => {
     soundService.setEnabled(enabled);
     setSoundEnabledState(enabled);
+    if (enabled) {
+      void soundService.unlockAudio().then((ok) => {
+        setAudioUnlocked(ok);
+        if (ok) soundService.playTick();
+      });
+    }
   }, []);
 
   const addToast = useCallback(
@@ -697,6 +729,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? ` · ${order.total_amount.toLocaleString('uz-UZ')} so'm`
         : '';
 
+      // Fire native browser/OS notification when permission is granted (works even when tab is in background)
+      try {
+        if (
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          new Notification(`🔔 Yangi buyurtma: Stol №${order.table_number}`, {
+            body: `${ordNum} (${itemsText}${totalText}) — qabul qilish kutilmoqda`,
+            tag: `dineflow-order-${order.id}`,
+          });
+        }
+      } catch {
+        // Ignore OS notification errors
+      }
+
       addToast(
         'new_order',
         `Yangi buyurtma: Stol №${order.table_number}`,
@@ -707,13 +755,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           orderId: order.id,
           totalAmount: order.total_amount,
           itemsCount: order.items_count,
-          actionLabel: 'Oshxonaga uzatish',
+          actionLabel: 'Qabul qilish (✓✓)',
           onAction: async () => {
             await dataService.updateOrderStatus(order.id, 'preparing');
-            addToast('success', 'Tayyorlash boshlandi', `${ordNum} oshxonaga uzatildi.`);
+            addToast('success', 'Qabul qilindi', `${ordNum} oshxonaga uzatildi.`);
             refreshData();
           },
-          duration: 12000,
+          duration: 16000,
         }
       );
     },
@@ -898,9 +946,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Test simulation for waiters
   const simulateWaiterNotification = useCallback(
-    (type: 'kitchen_ready' | 'customer_call') => {
+    (type: 'new_order' | 'kitchen_ready' | 'customer_call') => {
+      void soundService.unlockAudio();
       const randomTable = Math.floor(Math.random() * 25) + 1;
-      if (type === 'kitchen_ready') {
+      if (type === 'new_order') {
+        notifyNewOrder({
+          id: 'test-new-order-' + Date.now(),
+          order_number: 'ORD-' + Math.floor(1000 + Math.random() * 9000),
+          table_number: randomTable,
+          total_amount: 145000,
+          items_count: 3,
+        });
+      } else if (type === 'kitchen_ready') {
         notifyKitchenReady({
           id: 'test-order-' + Date.now(),
           order_number: 'ORD-' + Math.floor(1000 + Math.random() * 9000),
@@ -915,7 +972,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
     },
-    [notifyKitchenReady, notifyCustomerCall]
+    [notifyNewOrder, notifyKitchenReady, notifyCustomerCall]
   );
 
   // Fetch all live data
@@ -948,16 +1005,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       } else {
         // Detect brand new orders (notify ONLY Waiter screen) & status transitions
+        const nowMs = Date.now();
         ords.forEach((o) => {
           const prevStatus = prevOrdersRef.current.get(o.id);
           if (!prevStatus && o.status === 'new') {
-            notifyNewOrder({
-              id: o.id,
-              order_number: o.order_number,
-              table_number: o.table_number,
-              total_amount: o.total_amount,
-              items_count: o.items?.length,
-            });
+            const createdMs = new Date(o.created_at).getTime();
+            const isRecentOrder = !Number.isNaN(createdMs) && nowMs - createdMs < 10 * 60 * 1000;
+            if (isRecentOrder) {
+              notifyNewOrder({
+                id: o.id,
+                order_number: o.order_number,
+                table_number: o.table_number,
+                total_amount: o.total_amount,
+                items_count: o.items?.length,
+              });
+            }
           } else if (prevStatus && prevStatus !== o.status) {
             if (o.status === 'ready') {
               notifyKitchenReady(o);
@@ -1080,6 +1142,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Ignore
     }
 
+    // Cross-tab localStorage event fallback (works even if BroadcastChannel is unavailable)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('dineflow_')) {
+        refreshData();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     // Fast polling fallback every 3 seconds for real-time cross-device sync
     const timer = setInterval(() => {
       refreshData();
@@ -1087,6 +1157,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       window.removeEventListener('dineflow:sync', handleSync);
+      window.removeEventListener('storage', handleStorage);
       if (bc) bc.close();
       clearInterval(timer);
     };
@@ -1650,6 +1721,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isLoading,
       soundEnabled,
       setSoundEnabled,
+      audioUnlocked,
+      unlockAudio,
       refreshData,
       placeOrder,
       cancelCustomerOrder,
@@ -1732,6 +1805,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isLoading,
       soundEnabled,
       setSoundEnabled,
+      audioUnlocked,
+      unlockAudio,
       refreshData,
       placeOrder,
       cancelCustomerOrder,

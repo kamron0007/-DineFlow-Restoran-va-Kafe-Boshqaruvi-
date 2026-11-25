@@ -5,18 +5,18 @@ import { Order, OrderStatus } from '../../types';
 import { useLiveClock } from '../../hooks/useLiveClock';
 import {
   Bell,
+  BellRing,
   CheckCircle2,
   Clock,
   Receipt,
   UtensilsCrossed,
-  FileText,
   Volume2,
   VolumeX,
   X,
   Eye,
   Check,
   ChefHat,
-  Sparkles,
+  HandPlatter,
   Users,
   Phone,
   ShieldCheck,
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { OrderTickBadge } from '../../components/OrderTickBadge';
+import { soundService } from '../../services/sound';
 
 export const WaiterDashboard: React.FC = () => {
   const {
@@ -39,6 +40,8 @@ export const WaiterDashboard: React.FC = () => {
     settleAndFreeTable,
     soundEnabled,
     setSoundEnabled,
+    audioUnlocked,
+    unlockAudio,
     simulateWaiterNotification,
     restaurantName,
     restaurantBranch,
@@ -56,9 +59,31 @@ export const WaiterDashboard: React.FC = () => {
 
   const { timeString, dateString } = useLiveClock();
 
+  const newOrders = useMemo(() => {
+    return orders.filter((o) => o.status === 'new');
+  }, [orders]);
+
   useEffect(() => {
-    document.title = 'DineFlow — Ofitsiant Terminali (/waiter)';
-  }, []);
+    if (newOrders.length > 0) {
+      document.title = `🔔 (${newOrders.length}) Yangi buyurtma! — Ofitsiant Terminali`;
+    } else {
+      document.title = 'DineFlow — Ofitsiant Terminali (/waiter)';
+    }
+  }, [newOrders.length]);
+
+  // If entering /waiter while a brand-new (< 2 min) unaccepted order exists and audio is unlocked, chime once
+  const hasPlayedInitialFreshChimeRef = React.useRef(false);
+  useEffect(() => {
+    if (hasPlayedInitialFreshChimeRef.current || !soundEnabled || !audioUnlocked) return;
+    const hasFreshOrder = newOrders.some((o) => {
+      const createdMs = new Date(o.created_at).getTime();
+      return !Number.isNaN(createdMs) && Date.now() - createdMs < 2 * 60 * 1000;
+    });
+    if (hasFreshOrder) {
+      hasPlayedInitialFreshChimeRef.current = true;
+      soundService.playNewOrderChime();
+    }
+  }, [newOrders, soundEnabled, audioUnlocked]);
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedTableFilter, setSelectedTableFilter] = useState<number | 'all'>('all');
@@ -96,7 +121,7 @@ export const WaiterDashboard: React.FC = () => {
   }, [serviceCalls]);
 
   // Counts
-  const newOrdersCount = orders.filter((o) => o.status === 'new').length;
+  const newOrdersCount = newOrders.length;
   const readyOrdersCount = orders.filter((o) => o.status === 'ready').length;
 
   return (
@@ -140,6 +165,15 @@ export const WaiterDashboard: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap justify-end">
             {/* Quick alert tester */}
             <div className="hidden xl:flex items-center gap-1.5 bg-white/6 p-1 rounded-full border border-white/12 text-xs">
+              <button
+                type="button"
+                onClick={() => simulateWaiterNotification('new_order')}
+                className="bg-[#F59E0B]/25 hover:bg-[#F59E0B]/35 text-amber-200 font-semibold px-3 py-1 rounded-full flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+                title="Yangi buyurtma ovozli bildirishnomasini tekshirish"
+              >
+                <HandPlatter className="w-3.5 h-3.5 text-[#F59E0B]" />
+                <span>Buyurtma</span>
+              </button>
               <button
                 type="button"
                 onClick={() => simulateWaiterNotification('kitchen_ready')}
@@ -312,18 +346,138 @@ export const WaiterDashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Browser Autoplay Audio Unlock Prompt (guarantees audible incoming order chime on Vercel/mobile) */}
+        {soundEnabled && !audioUnlocked && (
+          <div className="bg-amber-50 border-2 border-[#F59E0B] p-4 rounded-2xl shadow-sm flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center shrink-0">
+                <Volume2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-sm text-[#173F35]">
+                  Ovozli bildirishnomani faollashtiring
+                </h3>
+                <p className="text-xs text-[#59635E] mt-0.5">
+                  Yangi buyurtma kelganda qo&apos;ng&apos;iroq ovozi va bildirishnoma ishlashi uchun tugmani bir marta bosing.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void unlockAudio(true);
+              }}
+              className="px-4 py-2.5 rounded-xl bg-[#173F35] hover:bg-[#1E5245] active:scale-95 text-white font-display font-bold text-xs flex items-center gap-2 shadow-sm transition-all"
+            >
+              <BellRing className="w-4 h-4 text-[#F59E0B]" />
+              <span>Ovozni yoqish va tekshirish</span>
+            </button>
+          </div>
+        )}
+
+        {/* Prominent Incoming New Orders Strip (Always visible regardless of table/status filter) */}
+        {newOrders.length > 0 && (
+          <div className="bg-[#173F35] text-white rounded-3xl p-4 sm:p-5 border-2 border-[#F59E0B] shadow-[0_14px_34px_-14px_rgba(23,63,53,0.45)] space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center shrink-0 animate-bounce">
+                  <BellRing className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="font-display font-extrabold text-base text-white">
+                      Yangi buyurtmalar keldi ({newOrders.length})
+                    </h2>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#F59E0B] text-[#173F35]">
+                      Qabul qilish kutilmoqda
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-100/80 mt-0.5">
+                    Mijoz buyurtmani tasdiqlashingizni kutmoqda (✓ → ✓✓).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter('new');
+                  setSelectedTableFilter('all');
+                  setFilterMyTablesOnly(false);
+                }}
+                className="text-xs font-bold text-[#F59E0B] hover:text-amber-200 underline underline-offset-4"
+              >
+                Barcha yangi buyurtmalarni ko&apos;rish
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {newOrders.slice(0, 6).map((ord) => (
+                <div
+                  key={ord.id}
+                  className="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex items-center justify-between gap-3 flex-wrap"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="bg-[#F59E0B] text-[#173F35] font-mono font-black text-xs px-2.5 py-0.5 rounded-lg tabular-nums">
+                        STOL №{ord.table_number}
+                      </span>
+                      <span className="font-mono text-xs font-bold text-emerald-100">
+                        {ord.order_number}
+                      </span>
+                      <span className="text-[11px] text-emerald-100/70">
+                        · {formatTimeAgo(ord.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/95 font-medium mt-1.5 truncate">
+                      {ord.items.map((it) => `${it.quantity}x ${it.item_name}`).join(', ')}
+                    </p>
+                    <span className="text-xs font-mono font-bold text-[#F59E0B] mt-0.5 block tabular-nums">
+                      {formatUZS(ord.total_amount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setInspectOrder(ord)}
+                      className="px-3 py-2 rounded-xl bg-white/12 hover:bg-white/20 text-white text-xs font-bold transition-colors"
+                    >
+                      Chek
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateOrderStatus(ord.id, 'preparing')}
+                      className="px-3.5 py-2 rounded-xl bg-[#F59E0B] hover:bg-amber-400 active:scale-95 text-[#173F35] text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Qabul qilish</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Real-time Toast Alerts Status Banner */}
         <div className="bg-white p-3.5 rounded-2xl border border-[#E5E0D8] flex items-center justify-between gap-3 flex-wrap text-xs">
           <div className="flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B] shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-bold text-[#173F35]">Jonli bildirishnomalar faol:</span>
               <span className="text-[#59635E]">
-                Oshxona taom tayyorlaganda yoki mijoz chaqirganda real vaqtda ovozli ogohlantirish chiqadi.
+                Mijoz buyurtma berganda, chaqirganda yoki taom tayyor bo&apos;lganda real vaqtda ovozli ogohlantirish chiqadi.
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => simulateWaiterNotification('new_order')}
+              className="bg-[#173F35] hover:bg-[#1E5245] text-white font-bold px-3 py-1.5 rounded-full flex items-center gap-1 transition-all active:scale-95 text-[11px]"
+            >
+              <HandPlatter className="w-3.5 h-3.5 text-[#F59E0B]" />
+              <span>Yangi buyurtma testi</span>
+            </button>
             <button
               type="button"
               onClick={() => simulateWaiterNotification('kitchen_ready')}

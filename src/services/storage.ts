@@ -20,6 +20,17 @@ import {
   INITIAL_ORDERS,
   INITIAL_WAITERS,
 } from './seedData';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import { db } from './firebase';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { generateOrderNumber } from '../utils/formatters';
 import { soundService } from './sound';
@@ -75,13 +86,19 @@ export const emitRealtimeEvent = (type: 'orders' | 'tables' | 'menu' | 'service'
 class DataService {
   private isDemo: boolean;
   private realtimeInitialized = false;
+  private firestoreInitialized = false;
+  private firestoreOrdersReady = false;
+  private firestoreCallsReady = false;
+  private firestoreOrderStatusMap = new Map<string, OrderStatus>();
+  private firestoreCallStateMap = new Map<string, { status: string; callCount: number }>();
   private isSyncingOrders = false;
   private lastSyncAt = 0;
   private recentMutations = new Map<string, number>();
 
   constructor() {
-    this.isDemo = !isSupabaseConfigured();
+    this.isDemo = false;
     this.ensureInitialized();
+    this.initFirestoreRealtime();
     this.initSupabaseRealtime();
     if (typeof window !== 'undefined') {
       this.syncOrdersFromSupabase(false, true);
@@ -90,6 +107,341 @@ class DataService {
 
   public getIsDemo(): boolean {
     return this.isDemo;
+  }
+
+  private sanitizeFirestoreId(id: string, fallbackPrefix: string): string {
+    const clean = String(id || '')
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .slice(0, 120);
+    return clean.length > 0 ? clean : `${fallbackPrefix}-${Date.now()}`;
+  }
+
+  private buildFirestoreOrderPayload(order: Order): Record<string, unknown> {
+    const safeId = this.sanitizeFirestoreId(order.id, 'order');
+    const safeTableId = this.sanitizeFirestoreId(order.table_id || `table-${order.table_number}`, 'table');
+    const safeTableNum = Math.min(200, Math.max(1, Math.round(Number(order.table_number) || 1)));
+    const safeTotal = Math.min(100000000, Math.max(0, Math.round(Number(order.total_amount) || 0)));
+
+    const loyaltyParts: string[] = [];
+    if (order.customer_name) loyaltyParts.push(`Mijoz: ${order.customer_name}`);
+    if ((order.cashback_used || 0) > 0) {
+      loyaltyParts.push(`Keshbek: -${Math.round(order.cashback_used || 0).toLocaleString('uz-UZ')} so'm`);
+    }
+    const loyaltyPrefix = loyaltyParts.length > 0 ? `[${loyaltyParts.join(' · ')}]` : '';
+    const baseNote = String(order.customer_note || '').trim();
+    const combinedNote = [loyaltyPrefix, baseNote]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .slice(0, 300);
+
+    const safeItems = (order.items || []).slice(0, 50).map((it, idx) => ({
+      id: this.sanitizeFirestoreId(it.id || `item-${safeId}-${idx + 1}`, 'item'),
+      order_id: safeId,
+      menu_item_id: String(it.menu_item_id || ''),
+      item_name: String(it.item_name || 'Taom').slice(0, 120),
+      unit_price: Math.max(0, Number(it.unit_price) || 0),
+      quantity: Math.max(1, Math.round(Number(it.quantity) || 1)),
+      item_note: String(it.item_note || '').slice(0, 160),
+      line_total: Math.max(0, Number(it.line_total) || 0),
+    }));
+
+    return {
+      id: safeId,
+      order_number: String(order.order_number || generateOrderNumber()).slice(0, 32),
+      table_id: safeTableId,
+      table_number: safeTableNum,
+      status: order.status || 'new',
+      total_amount: safeTotal,
+      customer_note: combinedNote,
+      waiter_called: Boolean(order.waiter_called),
+      bill_requested: Boolean(order.bill_requested),
+      waiter_name: String(order.waiter_name || "Mas'ul ofitsiant").slice(0, 100),
+      items: safeItems,
+      created_at: String(order.created_at || new Date().toISOString()).slice(0, 40),
+      updated_at: String(order.updated_at || new Date().toISOString()).slice(0, 40),
+      server_created_at: serverTimestamp(),
+      server_updated_at: serverTimestamp(),
+    };
+  }
+
+  private buildFirestoreServiceCallPayload(call: ServiceCall): Record<string, unknown> {
+    const safeId = this.sanitizeFirestoreId(call.id, 'call');
+    const safeTableId = this.sanitizeFirestoreId(call.table_id || `table-${call.table_number}`, 'table');
+    const safeTableNum = Math.min(200, Math.max(1, Math.round(Number(call.table_number) || 1)));
+    const safeCallCount = Math.min(20, Math.max(1, Math.round(Number(call.call_count) || 1)));
+
+    return {
+      id: safeId,
+      table_id: safeTableId,
+      table_number: safeTableNum,
+      type: call.type || 'waiter',
+      note: String(call.note || '').slice(0, 250),
+      call_count: safeCallCount,
+      escalated_to_admin: Boolean(call.escalated_to_admin),
+      assigned_waiter_name: String(call.assigned_waiter_name || "Mas'ul ofitsiant").slice(0, 100),
+      status: call.status || 'pending',
+      created_at: String(call.created_at || new Date().toISOString()).slice(0, 40),
+      last_called_at: String(call.last_called_at || call.created_at || new Date().toISOString()).slice(0, 40),
+      server_created_at: serverTimestamp(),
+      server_updated_at: serverTimestamp(),
+    };
+  }
+
+  private mapFirestoreOrder(data: Record<string, any>): Order {
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items: OrderItem[] = rawItems.map((it: any, idx: number) => {
+      const unitPrice = Number(it.unit_price) || 0;
+      const qty = Number(it.quantity) || 1;
+      return {
+        id: String(it.id || `item-${data.id}-${idx + 1}`),
+        order_id: String(it.order_id || data.id || ''),
+        menu_item_id: String(it.menu_item_id || ''),
+        item_name: String(it.item_name || 'Taom'),
+        unit_price: unitPrice,
+        quantity: qty,
+        item_note: String(it.item_note || ''),
+        line_total: Number(it.line_total) || unitPrice * qty,
+      };
+    });
+
+    return {
+      id: String(data.id),
+      order_number: String(data.order_number || ''),
+      table_id: String(data.table_id || `table-${data.table_number || 1}`),
+      table_number: Number(data.table_number) || 1,
+      status: (data.status || 'new') as OrderStatus,
+      total_amount: Number(data.total_amount) || 0,
+      customer_note: String(data.customer_note || ''),
+      waiter_called: Boolean(data.waiter_called),
+      bill_requested: Boolean(data.bill_requested),
+      waiter_name: String(data.waiter_name || "Mas'ul ofitsiant"),
+      rating: typeof data.rating === 'number' ? data.rating : undefined,
+      items,
+      created_at: String(data.created_at || new Date().toISOString()),
+      updated_at: String(data.updated_at || data.created_at || new Date().toISOString()),
+    };
+  }
+
+  private mapFirestoreServiceCall(data: Record<string, any>): ServiceCall {
+    return {
+      id: String(data.id),
+      table_id: String(data.table_id || `table-${data.table_number || 1}`),
+      table_number: Number(data.table_number) || 1,
+      type: (data.type || 'waiter') as 'waiter' | 'bill' | 'water',
+      note: String(data.note || ''),
+      call_count: Number(data.call_count) || 1,
+      escalated_to_admin: Boolean(data.escalated_to_admin),
+      assigned_waiter_name: String(data.assigned_waiter_name || "Mas'ul ofitsiant"),
+      status: (data.status || 'pending') as 'pending' | 'resolved',
+      created_at: String(data.created_at || new Date().toISOString()),
+      last_called_at: String(data.last_called_at || data.created_at || new Date().toISOString()),
+    };
+  }
+
+  private initFirestoreRealtime() {
+    if (this.firestoreInitialized || typeof window === 'undefined') {
+      return;
+    }
+    this.firestoreInitialized = true;
+
+    try {
+      // Real-time Orders stream (query matches firestore.rules list constraint: table_number 1..200)
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('table_number', '>=', 1),
+        where('table_number', '<=', 200)
+      );
+
+      onSnapshot(
+        ordersQuery,
+        (snapshot) => {
+          const rawLocal = localStorage.getItem(STORAGE_KEYS.ORDERS);
+          const localOrders: Order[] = rawLocal ? JSON.parse(rawLocal) : INITIAL_ORDERS;
+          const localMap = new Map<string, Order>(localOrders.map((o) => [o.id, o]));
+
+          const mergedMap = new Map<string, Order>();
+
+          // Preserve local orders (seed or pending local writes)
+          localOrders.forEach((lo) => {
+            mergedMap.set(lo.id, lo);
+          });
+
+          // Overlay live Firestore orders
+          snapshot.docs.forEach((docSnap) => {
+            const remote = this.mapFirestoreOrder({ id: docSnap.id, ...docSnap.data() });
+            const existingLocal = localMap.get(remote.id);
+
+            // If locally mutated within the last 4s, keep optimistic local status until write finishes
+            if (existingLocal && this.wasRecentlyMutated(remote.id)) {
+              mergedMap.set(remote.id, existingLocal);
+              return;
+            }
+
+            mergedMap.set(remote.id, {
+              ...existingLocal,
+              ...remote,
+              // Preserve local-only loyalty fields when present on the same device
+              subtotal_amount: existingLocal?.subtotal_amount,
+              cashback_used: existingLocal?.cashback_used,
+              cashback_earned: existingLocal?.cashback_earned,
+              customer_account_id: existingLocal?.customer_account_id,
+              customer_name: existingLocal?.customer_name,
+              customer_review: existingLocal?.customer_review,
+            });
+          });
+
+          const mergedList = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+
+          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(mergedList));
+
+          if (!this.firestoreOrdersReady) {
+            this.firestoreOrdersReady = true;
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              this.firestoreOrderStatusMap.set(docSnap.id, (data.status || 'new') as OrderStatus);
+            });
+            emitRealtimeEvent('orders');
+            return;
+          }
+
+          let emittedSpecific = false;
+          snapshot.docChanges().forEach((change) => {
+            const remote = this.mapFirestoreOrder({ id: change.doc.id, ...change.doc.data() });
+            const prevStatus = this.firestoreOrderStatusMap.get(remote.id);
+            this.firestoreOrderStatusMap.set(remote.id, remote.status);
+
+            if (this.wasRecentlyMutated(remote.id)) return;
+
+            if (change.type === 'added' && remote.status === 'new') {
+              emittedSpecific = true;
+              emitRealtimeEvent('orders', {
+                action: 'order_created',
+                orderId: remote.id,
+                orderNumber: remote.order_number,
+                tableNumber: remote.table_number,
+                totalAmount: remote.total_amount,
+                itemsCount: remote.items.length,
+              });
+            } else if (change.type === 'modified' && prevStatus && prevStatus !== remote.status) {
+              emittedSpecific = true;
+              emitRealtimeEvent('orders', {
+                action: remote.status === 'cancelled' ? 'order_cancelled' : 'order_status_changed',
+                orderId: remote.id,
+                orderNumber: remote.order_number,
+                tableNumber: remote.table_number,
+                oldStatus: prevStatus,
+                newStatus: remote.status,
+              });
+            }
+          });
+
+          if (!emittedSpecific) {
+            emitRealtimeEvent('orders');
+          }
+        },
+        (error) => {
+          console.error('Firestore orders onSnapshot error:', error);
+        }
+      );
+
+      // Real-time Service Calls stream (matches firestore.rules list constraint: table_number 1..200)
+      const callsQuery = query(
+        collection(db, 'service_calls'),
+        where('table_number', '>=', 1),
+        where('table_number', '<=', 200)
+      );
+
+      onSnapshot(
+        callsQuery,
+        (snapshot) => {
+          const rawLocal = localStorage.getItem(STORAGE_KEYS.SERVICE_CALLS);
+          const localCalls: ServiceCall[] = rawLocal ? JSON.parse(rawLocal) : [];
+          const mergedMap = new Map<string, ServiceCall>(localCalls.map((c) => [c.id, c]));
+
+          snapshot.docs.forEach((docSnap) => {
+            const remote = this.mapFirestoreServiceCall({ id: docSnap.id, ...docSnap.data() });
+            if (mergedMap.has(remote.id) && this.wasRecentlyMutated(remote.id)) {
+              return;
+            }
+            mergedMap.set(remote.id, remote);
+          });
+
+          const mergedCalls = Array.from(mergedMap.values()).sort(
+            (a, b) =>
+              new Date(b.last_called_at || b.created_at).getTime() -
+              new Date(a.last_called_at || a.created_at).getTime()
+          );
+
+          localStorage.setItem(STORAGE_KEYS.SERVICE_CALLS, JSON.stringify(mergedCalls));
+
+          if (!this.firestoreCallsReady) {
+            this.firestoreCallsReady = true;
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              this.firestoreCallStateMap.set(docSnap.id, {
+                status: String(data.status || 'pending'),
+                callCount: Number(data.call_count) || 1,
+              });
+            });
+            emitRealtimeEvent('service');
+            return;
+          }
+
+          let emittedSpecific = false;
+          snapshot.docChanges().forEach((change) => {
+            const remote = this.mapFirestoreServiceCall({ id: change.doc.id, ...change.doc.data() });
+            const prev = this.firestoreCallStateMap.get(remote.id);
+            this.firestoreCallStateMap.set(remote.id, {
+              status: remote.status,
+              callCount: remote.call_count || 1,
+            });
+
+            if (this.wasRecentlyMutated(remote.id)) return;
+
+            if (
+              remote.status === 'pending' &&
+              (change.type === 'added' || (remote.call_count || 1) > (prev?.callCount || 0))
+            ) {
+              emittedSpecific = true;
+              emitRealtimeEvent('service', {
+                action: 'service_call_created',
+                callId: remote.id,
+                tableNumber: remote.table_number,
+                serviceType: remote.type,
+                serviceNote: remote.note,
+                callCount: remote.call_count,
+                escalatedToAdmin: remote.escalated_to_admin,
+                assignedWaiterName: remote.assigned_waiter_name,
+              });
+            } else if (
+              change.type === 'modified' &&
+              remote.status === 'resolved' &&
+              prev?.status === 'pending'
+            ) {
+              emittedSpecific = true;
+              emitRealtimeEvent('service', {
+                action: 'service_call_resolved',
+                callId: remote.id,
+                tableNumber: remote.table_number,
+                assignedWaiterName: remote.assigned_waiter_name,
+              });
+            }
+          });
+
+          if (!emittedSpecific) {
+            emitRealtimeEvent('service');
+          }
+        },
+        (error) => {
+          console.error('Firestore service_calls onSnapshot error:', error);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to initialize Firestore realtime listeners:', error);
+    }
   }
 
   private markMutated(orderId: string) {
@@ -464,7 +816,7 @@ class DataService {
     const dishMap = new Map<string, MenuItem>(allDishes.map((d) => [d.id, d]));
 
     let calculatedTotal = 0;
-    const orderId = 'order-' + Date.now();
+    const orderId = `order-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const orderNumber = generateOrderNumber();
     const now = new Date().toISOString();
 
@@ -523,6 +875,12 @@ class DataService {
       tableNumber: newOrder.table_number,
       totalAmount: newOrder.total_amount,
       itemsCount: newOrder.items.length,
+    });
+
+    // Real-time cloud sync to Firebase Firestore (cross-device live waiter & kitchen alerts)
+    const firestorePayload = this.buildFirestoreOrderPayload(newOrder);
+    setDoc(doc(db, 'orders', newOrder.id), firestorePayload).catch((err) => {
+      console.error('Firestore createOrder error:', err);
     });
 
     // Non-blocking background write to Supabase (strictly valid schema columns only)
@@ -614,6 +972,17 @@ class DataService {
       newStatus,
     });
 
+    // Real-time cloud status update to Firebase Firestore
+    updateDoc(doc(db, 'orders', orderId), {
+      status: newStatus,
+      updated_at: now,
+      server_updated_at: serverTimestamp(),
+    }).catch((err: any) => {
+      if (err?.code !== 'not-found') {
+        console.error('Firestore updateOrderStatus error:', err);
+      }
+    });
+
     // Non-blocking background update to Supabase
     if (isSupabaseConfigured() && supabase) {
       supabase
@@ -660,6 +1029,16 @@ class DataService {
       orderNumber: target.order_number,
       tableNumber: target.table_number,
       newStatus: 'cancelled',
+    });
+
+    updateDoc(doc(db, 'orders', orderId), {
+      status: 'cancelled',
+      updated_at: now,
+      server_updated_at: serverTimestamp(),
+    }).catch((err: any) => {
+      if (err?.code !== 'not-found') {
+        console.error('Firestore cancelOrder error:', err);
+      }
     });
 
     if (isSupabaseConfigured() && supabase) {
@@ -750,6 +1129,37 @@ class DataService {
           .eq('id', activeOrder.id)
           .then(() => {});
       }
+
+      updateDoc(doc(db, 'orders', activeOrder.id), {
+        waiter_called: Boolean(activeOrder.waiter_called),
+        bill_requested: Boolean(activeOrder.bill_requested),
+        updated_at: new Date().toISOString(),
+        server_updated_at: serverTimestamp(),
+      }).catch(() => {});
+    }
+
+    // Real-time cloud sync to Firebase Firestore for service calls
+    this.markMutated(call.id);
+    if (existingPending) {
+      updateDoc(doc(db, 'service_calls', call.id), {
+        type: call.type,
+        note: String(call.note || '').slice(0, 250),
+        call_count: Math.min(20, Math.max(1, call.call_count || 1)),
+        escalated_to_admin: Boolean(call.escalated_to_admin),
+        assigned_waiter_name: String(call.assigned_waiter_name || "Mas'ul ofitsiant").slice(0, 100),
+        last_called_at: call.last_called_at || new Date().toISOString(),
+        server_updated_at: serverTimestamp(),
+      }).catch((err: any) => {
+        if (err?.code === 'not-found') {
+          setDoc(doc(db, 'service_calls', call.id), this.buildFirestoreServiceCallPayload(call)).catch(() => {});
+        } else {
+          console.error('Firestore update service_call error:', err);
+        }
+      });
+    } else {
+      setDoc(doc(db, 'service_calls', call.id), this.buildFirestoreServiceCallPayload(call)).catch((err) => {
+        console.error('Firestore create service_call error:', err);
+      });
     }
 
     soundService.playTick();
@@ -768,10 +1178,16 @@ class DataService {
   }
 
   public async resolveServiceCall(callId: string): Promise<void> {
+    this.markMutated(callId);
     const currentCalls = await this.getServiceCalls();
     const target = currentCalls.find((c) => c.id === callId);
     const updated = currentCalls.map((c) => (c.id === callId ? { ...c, status: 'resolved' as const } : c));
     localStorage.setItem(STORAGE_KEYS.SERVICE_CALLS, JSON.stringify(updated));
+
+    updateDoc(doc(db, 'service_calls', callId), {
+      status: 'resolved',
+      server_updated_at: serverTimestamp(),
+    }).catch(() => {});
 
     if (target) {
       const currentOrders = await this.getOrders();
@@ -781,6 +1197,13 @@ class DataService {
         activeOrder.waiter_called = false;
         activeOrder.bill_requested = false;
         localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
+
+        updateDoc(doc(db, 'orders', activeOrder.id), {
+          waiter_called: false,
+          bill_requested: false,
+          updated_at: new Date().toISOString(),
+          server_updated_at: serverTimestamp(),
+        }).catch(() => {});
       }
     }
 
@@ -812,6 +1235,16 @@ class DataService {
 
     if (toSettleIds.length > 0) {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
+      toSettleIds.forEach((id) => {
+        updateDoc(doc(db, 'orders', id), {
+          status: 'delivered',
+          bill_requested: false,
+          waiter_called: false,
+          updated_at: now,
+          server_updated_at: serverTimestamp(),
+        }).catch(() => {});
+      });
+
       if (isSupabaseConfigured() && supabase) {
         supabase
           .from('orders')
@@ -827,12 +1260,23 @@ class DataService {
     }
 
     const currentCalls = await this.getServiceCalls();
-    const updatedCalls = currentCalls.map((c) =>
-      c.table_number === tableNumber && c.status === 'pending'
-        ? { ...c, status: 'resolved' as const }
-        : c
-    );
+    const resolvedCallIds: string[] = [];
+    const updatedCalls = currentCalls.map((c) => {
+      if (c.table_number === tableNumber && c.status === 'pending') {
+        this.markMutated(c.id);
+        resolvedCallIds.push(c.id);
+        return { ...c, status: 'resolved' as const };
+      }
+      return c;
+    });
     localStorage.setItem(STORAGE_KEYS.SERVICE_CALLS, JSON.stringify(updatedCalls));
+
+    resolvedCallIds.forEach((id) => {
+      updateDoc(doc(db, 'service_calls', id), {
+        status: 'resolved',
+        server_updated_at: serverTimestamp(),
+      }).catch(() => {});
+    });
 
     soundService.playSuccess();
     emitRealtimeEvent('orders', {
