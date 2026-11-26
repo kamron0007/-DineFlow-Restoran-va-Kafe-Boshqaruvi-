@@ -16,6 +16,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useLanguage } from '../context/LanguageContext';
 
 export type DishModalTab = 'order' | 'reviews';
 
@@ -56,6 +57,8 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
     submitDishReview,
     restaurantRating,
   } = useApp();
+  const { localizeDish } = useLanguage();
+  const displayDish = useMemo(() => (dish ? localizeDish(dish) : null), [dish, localizeDish]);
 
   const [activeTab, setActiveTab] = useState<DishModalTab>(initialTab);
   const [quantity, setQuantity] = useState(1);
@@ -174,7 +177,7 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
           {imgSrc && !imageError ? (
             <img
               src={imgSrc}
-              alt={dish.name}
+              alt={displayDish?.name || dish.name}
               referrerPolicy="no-referrer"
               onError={handleImageError}
               className="w-full h-full object-cover"
@@ -184,7 +187,9 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
               <div className="w-14 h-14 rounded-2xl bg-[#173F35]/10 flex items-center justify-center text-[#173F35] mb-2">
                 <Utensils className="w-7 h-7" />
               </div>
-              <span className="font-display font-bold text-lg text-[#173F35]">{dish.name}</span>
+              <span className="font-display font-bold text-lg text-[#173F35]">
+                {displayDish?.name || dish.name}
+              </span>
             </div>
           )}
 
@@ -217,10 +222,10 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
                   </span>
                 </>
               )}
-              {dish.weight_or_portion && (
+              {displayDish?.weight_or_portion && (
                 <>
                   <span className="opacity-60" aria-hidden="true">·</span>
-                  <span>{dish.weight_or_portion}</span>
+                  <span>{displayDish.weight_or_portion}</span>
                 </>
               )}
             </div>
@@ -243,7 +248,7 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="min-w-0">
               <h2 className="font-display font-bold text-xl text-[#202622] leading-snug">
-                {dish.name}
+                {displayDish?.name || dish.name}
               </h2>
               <div className="flex items-center gap-1.5 text-xs text-[#737A75] mt-0.5">
                 {dish.tier && (
@@ -305,7 +310,9 @@ export const DishDetailModal: React.FC<DishDetailModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5">
           {activeTab === 'order' ? (
             <div className="space-y-4">
-              <p className="text-sm text-[#57605B] leading-relaxed">{dish.description}</p>
+              <p className="text-sm text-[#57605B] leading-relaxed">
+                {displayDish?.description || dish.description}
+              </p>
 
               {/* Dish Special Request (Taomga talabnoma) */}
               <div className="bg-[#FAF8F3] rounded-2xl border border-[#E5E0D8] p-3.5 space-y-2.5">

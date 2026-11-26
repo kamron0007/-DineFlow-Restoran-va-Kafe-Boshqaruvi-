@@ -765,7 +765,7 @@ async function startServer() {
     const isEscalated =
       escalated_to_admin !== undefined
         ? Boolean(escalated_to_admin)
-        : computedCount >= 2 || otherPending.length + 1 >= 3;
+        : computedCount >= 3;
 
     const now = new Date().toISOString();
     const newCall: ServiceCall = {

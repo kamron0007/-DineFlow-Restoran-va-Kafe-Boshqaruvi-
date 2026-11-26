@@ -523,15 +523,39 @@ export const StaffManagementPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="text-xs font-mono text-[#59635E] flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-[#E5E0D8]">
-                        <span className="flex items-center gap-1.5">
-                          <Phone className="w-3.5 h-3.5 text-[#173F35]" />
-                          <span>{acc.phone_local || acc.phone_masked}</span>
-                        </span>
-                        {acc.role === 'waiter' && acc.assigned_tables && acc.assigned_tables.length > 0 && (
-                          <span className="font-sans text-[11px] font-semibold text-[#173F35]">
-                            {acc.assigned_tables.length} stol
+                      <div className="text-xs font-mono text-[#59635E] space-y-2 bg-white px-3 py-2.5 rounded-xl border border-[#E5E0D8]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-[#173F35]" />
+                            <span>{acc.phone_local || acc.phone_masked}</span>
                           </span>
+                          {acc.role === 'waiter' && (
+                            <span
+                              className={`font-sans text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                                acc.assigned_tables && acc.assigned_tables.length > 0
+                                  ? 'bg-emerald-50 text-[#173F35]'
+                                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+                              }`}
+                            >
+                              {acc.assigned_tables && acc.assigned_tables.length > 0
+                                ? `${acc.assigned_tables.length} ta stol`
+                                : 'Stol biriktirilmagan'}
+                            </span>
+                          )}
+                        </div>
+                        {acc.role === 'waiter' && acc.assigned_tables && acc.assigned_tables.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1 border-t border-[#F3EFE6]">
+                            {[...acc.assigned_tables]
+                              .sort((a, b) => a - b)
+                              .map((num) => (
+                                <span
+                                  key={num}
+                                  className="px-1.5 py-0.5 rounded bg-[#173F35] text-[#F59E0B] text-[10px] font-mono font-bold"
+                                >
+                                  №{num}
+                                </span>
+                              ))}
+                          </div>
                         )}
                       </div>
 
@@ -542,7 +566,7 @@ export const StaffManagementPage: React.FC = () => {
                           className="flex-1 min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 border border-[#E5E0D8] text-xs font-bold text-[#173F35] flex items-center justify-center gap-1.5 transition-colors"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
-                          <span>Tahrirlash</span>
+                          <span>{acc.role === 'waiter' ? 'Stollar & Tahrirlash' : 'Tahrirlash'}</span>
                         </button>
 
                         {confirmDeleteAccountId === acc.id ? (

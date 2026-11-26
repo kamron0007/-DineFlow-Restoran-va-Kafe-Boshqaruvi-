@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { formatUZS } from '../../utils/formatters';
@@ -47,6 +48,7 @@ export const CartPage: React.FC = () => {
     customerAccount,
     openCustomerAuth,
   } = useApp();
+  const { localizeDish } = useLanguage();
 
   const [customerNote, setCustomerNote] = useState('');
   const [expandedNoteIndexes, setExpandedNoteIndexes] = useState<Record<number, boolean>>({});
@@ -179,6 +181,7 @@ export const CartPage: React.FC = () => {
             {/* Cart Items List with Per-Dish Talabnoma */}
             <div className="bg-white rounded-3xl border border-[#E5E0D8] p-4 sm:p-5 shadow-[0_8px_28px_-18px_rgba(23,63,53,0.16)] divide-y divide-[#F2EFE9]">
               {cart.map((item, idx) => {
+                const displayDish = localizeDish(item.menuItem);
                 const lineTotal = item.menuItem.price * item.quantity;
                 const currentNote = item.item_note || '';
                 const isNoteOpen = Boolean(expandedNoteIndexes[idx] || currentNote.trim().length > 0);
@@ -197,7 +200,7 @@ export const CartPage: React.FC = () => {
                         <div className="w-16 h-16 rounded-2xl overflow-hidden bg-[#F3EFE6] shrink-0 border border-[#E5E0D8]">
                           <img
                             src={item.menuItem.image_url || `/images/dishes/${item.menuItem.id}.jpg`}
-                            alt={item.menuItem.name}
+                            alt={displayDish.name}
                             referrerPolicy="no-referrer"
                             onError={(e) => {
                               const target = e.currentTarget;
@@ -212,7 +215,7 @@ export const CartPage: React.FC = () => {
 
                         <div className="flex flex-col min-w-0">
                           <h4 className="font-display font-bold text-sm sm:text-base text-[#202622] truncate">
-                            {item.menuItem.name}
+                            {displayDish.name}
                           </h4>
                           <span className="text-xs text-[#737A75] font-mono tabular-nums">
                             {formatUZS(item.menuItem.price)} / dona
@@ -281,7 +284,7 @@ export const CartPage: React.FC = () => {
                       <div className="bg-[#FAF8F3] rounded-2xl border border-[#E5E0D8] p-3.5 space-y-2.5">
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="font-semibold text-[#173F35]">
-                            &ldquo;{item.menuItem.name}&rdquo; uchun talabnoma:
+                            &ldquo;{displayDish.name}&rdquo; uchun talabnoma:
                           </span>
                           <span className="text-[#737A75] font-mono tabular-nums">{currentNote.length}/160</span>
                         </div>

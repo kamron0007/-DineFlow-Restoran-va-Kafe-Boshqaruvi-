@@ -4,6 +4,7 @@ import { StaffAccountRole } from '../../types';
 import { STAFF_ROLE_LABELS } from '../../services/staffAccount';
 import { UzPhoneInput } from '../../components/UzPhoneInput';
 import { BrandLogo } from '../../components/BrandLogo';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 import {
   Lock,
   User,
@@ -187,13 +188,16 @@ export const LoginPage: React.FC = () => {
             </button>
           </nav>
 
-          <Link
-            to="/t/1"
-            className="min-h-[40px] px-4 py-2 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] text-[#173F35] text-xs sm:text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap shrink-0"
-          >
-            <QrCode className="w-4 h-4" />
-            <span>QR Menyu</span>
-          </Link>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <LanguageSwitcher theme="dark" />
+            <Link
+              to="/t/1"
+              className="min-h-[40px] px-4 py-2 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] text-[#173F35] text-xs sm:text-sm font-bold flex items-center gap-2 transition-all whitespace-nowrap shrink-0"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>QR Menyu</span>
+            </Link>
+          </div>
         </div>
       </header>
 

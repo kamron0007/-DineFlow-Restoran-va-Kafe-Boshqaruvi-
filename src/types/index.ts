@@ -48,6 +48,8 @@ export interface StaffAccount {
 export interface Category {
   id: string;
   name: string;
+  name_en?: string;
+  name_ru?: string;
   icon?: string;
   image_url?: string;
   sort_order: number;
@@ -58,7 +60,11 @@ export interface MenuItem {
   id: string;
   category_id: string;
   name: string;
+  name_en?: string;
+  name_ru?: string;
   description: string;
+  description_en?: string;
+  description_ru?: string;
   price: number; // in UZS (so'm)
   image_url: string;
   is_available: boolean;
@@ -140,6 +146,8 @@ export interface Order {
   cashback_used?: number;
   cashback_earned?: number;
   customer_account_id?: string;
+  guest_session_id?: string;
+  is_settled?: boolean;
   customer_name?: string;
   customer_note?: string;
   waiter_called?: boolean;

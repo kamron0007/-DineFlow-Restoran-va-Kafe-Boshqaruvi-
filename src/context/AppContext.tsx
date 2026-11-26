@@ -116,6 +116,8 @@ interface AppContextType {
   menuItems: MenuItem[];
   tables: RestaurantTable[];
   orders: Order[];
+  customerOrders: Order[];
+  guestSessionId: string;
   serviceCalls: ServiceCall[];
   isLoading: boolean;
 
@@ -137,6 +139,8 @@ interface AppContextType {
 
   // Customer Personal Cabinet & Cashback Loyalty
   customerAccount: CustomerAccount | null;
+  allCustomerAccounts: CustomerAccount[];
+  refreshCustomerAccounts: () => Promise<void>;
   customerTransactions: CashbackTransaction[];
   customerSessionMode: CustomerSessionMode;
   isCustomerAuthOpen: boolean;
@@ -152,6 +156,7 @@ interface AppContextType {
     newPin?: string;
   }) => Promise<CustomerAccount>;
   continueAsGuest: () => void;
+  endGuestSession: (showAuthModal?: boolean) => void;
   logoutCustomerAccount: () => void;
 
   // Staff Accounts (Admin, Waiter, Chef) — Create, Login & Edit
@@ -279,12 +284,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customerAccount, setCustomerAccount] = useState<CustomerAccount | null>(() =>
     customerAccountService.getCachedActiveAccount()
   );
+  const [allCustomerAccounts, setAllCustomerAccounts] = useState<CustomerAccount[]>(() =>
+    customerAccountService.getCachedAllAccounts()
+  );
   const [customerTransactions, setCustomerTransactions] = useState<CashbackTransaction[]>([]);
   const [customerSessionMode, setCustomerSessionMode] = useState<CustomerSessionMode>(() =>
     customerAccountService.getSavedSessionMode()
   );
+  const [guestSessionId, setGuestSessionId] = useState<string>(() =>
+    customerAccountService.getOrCreateGuestSessionId()
+  );
   const [isCustomerAuthOpen, setIsCustomerAuthOpen] = useState<boolean>(false);
   const [customerAuthInitialView, setCustomerAuthInitialView] = useState<'choice' | 'login' | 'register'>('choice');
+
+  const refreshCustomerAccounts = useCallback(async () => {
+    const list = await customerAccountService.listAllAccounts();
+    setAllCustomerAccounts(list);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -296,8 +312,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCustomerSessionMode('account');
       }
     });
+
+    const unsubAccounts = customerAccountService.subscribeAllAccounts((list) => {
+      if (!active) return;
+      setAllCustomerAccounts(list);
+    });
+
     return () => {
       active = false;
+      unsubAccounts();
     };
   }, []);
 
@@ -318,6 +341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     setCustomerAccount(account);
     setCustomerTransactions(transactions);
+    setAllCustomerAccounts((prev) => [account, ...prev.filter((a) => a.id !== account.id)]);
     setCustomerSessionMode('account');
     setIsCustomerAuthOpen(false);
     soundService.playSuccess();
@@ -342,14 +366,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomerAccount(null);
     setCustomerTransactions([]);
     setCustomerSessionMode('guest');
+    setGuestSessionId(customerAccountService.getOrCreateGuestSessionId());
     setIsCustomerAuthOpen(false);
+  }, []);
+
+  const endGuestSession = useCallback((showAuthModal: boolean = true) => {
+    const freshId = customerAccountService.resetGuestSessionId();
+    setGuestSessionId(freshId);
+    setCart([]);
+    setCustomerSessionMode('undecided');
+    soundService.playTick();
+    if (showAuthModal) {
+      setCustomerAuthInitialView('choice');
+      setIsCustomerAuthOpen(true);
+    }
   }, []);
 
   const logoutCustomerAccount = useCallback(() => {
     customerAccountService.clearSession();
     setCustomerAccount(null);
     setCustomerTransactions([]);
-    setCustomerSessionMode('guest');
+    setCustomerSessionMode('undecided');
+    setGuestSessionId(customerAccountService.getOrCreateGuestSessionId());
+    setCart([]);
     soundService.playTick();
   }, []);
 
@@ -367,33 +406,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     let active = true;
+    const applyStaffList = (list: StaffAccount[]) => {
+      if (!active) return;
+      setStaffAccounts(list);
+      const current = staffAccountService.getActiveStaffAccount();
+      if (current) {
+        const refreshed = list.find((a) => a.id === current.id && a.status === 'active') || null;
+        setActiveStaffAccount(refreshed);
+        if (refreshed) {
+          setUserRoleState(refreshed.role);
+          setCurrentUser({
+            id: refreshed.id,
+            full_name: refreshed.full_name,
+            role: refreshed.role,
+            created_at: refreshed.created_at,
+          });
+        } else {
+          staffAccountService.setActiveStaffAccountId(null);
+        }
+      }
+    };
+
     staffAccountService
       .ensureSeeded()
       .then((list) => {
-        if (!active) return;
-        setStaffAccounts(list);
-        const current = staffAccountService.getActiveStaffAccount();
-        if (current) {
-          const refreshed = list.find((a) => a.id === current.id && a.status === 'active') || null;
-          setActiveStaffAccount(refreshed);
-          if (refreshed) {
-            setUserRoleState(refreshed.role);
-            setCurrentUser({
-              id: refreshed.id,
-              full_name: refreshed.full_name,
-              role: refreshed.role,
-              created_at: refreshed.created_at,
-            });
-          } else {
-            staffAccountService.setActiveStaffAccountId(null);
-          }
-        }
+        applyStaffList(list);
       })
       .finally(() => {
         if (active) setIsStaffAccountsLoaded(true);
       });
+
+    const unsubscribeStaff = staffAccountService.subscribeStaffAccounts((list) => {
+      applyStaffList(list);
+    });
+
     return () => {
       active = false;
+      unsubscribeStaff();
     };
   }, []);
 
@@ -420,12 +469,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       badgeId?: string;
       assignedTables?: number[];
     }): Promise<StaffAccount> => {
-      const created = await staffAccountService.registerStaffAccount(params);
+      // Strictly enforce: ONLY Admin can assign tables to waiters
+      const isAdminActor = activeStaffAccount?.role === 'admin';
+      const safeParams = {
+        ...params,
+        assignedTables:
+          params.role === 'waiter' && isAdminActor ? params.assignedTables || [] : [],
+      };
+      const created = await staffAccountService.registerStaffAccount(safeParams);
       setStaffAccounts((prev) => [created, ...prev.filter((a) => a.id !== created.id)]);
       soundService.playSuccess();
       return created;
     },
-    []
+    [activeStaffAccount]
   );
 
   const loginStaffAccount = useCallback(
@@ -462,7 +518,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         assignedTables?: number[];
       }
     ): Promise<StaffAccount> => {
-      const updated = await staffAccountService.updateStaffAccount(accountId, params);
+      // Strictly enforce: ONLY Admin can modify assigned_tables, role, or account status
+      const isAdminActor = activeStaffAccount?.role === 'admin';
+      const existingAcc =
+        staffAccounts.find((a) => a.id === accountId) ||
+        staffAccountService.getCachedStaffAccounts().find((a) => a.id === accountId);
+
+      const safeParams = isAdminActor
+        ? params
+        : {
+            ...params,
+            role: existingAcc?.role || params.role,
+            status: existingAcc?.status || params.status,
+            assignedTables: existingAcc?.assigned_tables || [],
+          };
+
+      const updated = await staffAccountService.updateStaffAccount(accountId, safeParams);
       setStaffAccounts((prev) => [
         updated,
         ...prev.filter((a) => a.id !== accountId && a.id !== updated.id),
@@ -482,7 +553,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       soundService.playSuccess();
       return updated;
     },
-    []
+    [activeStaffAccount, staffAccounts]
   );
 
   const deleteStaffAccount = useCallback(async (accountId: string): Promise<void> => {
@@ -690,10 +761,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const prevPendingCallsRef = React.useRef<Map<string, ServiceCall>>(new Map());
   const isFirstSyncRef = React.useRef<boolean>(true);
   const activeTableNumberRef = React.useRef<number>(activeTableNumber);
+  const activeStaffAccountRef = React.useRef<StaffAccount | null>(activeStaffAccount);
 
   useEffect(() => {
     activeTableNumberRef.current = activeTableNumber;
   }, [activeTableNumber]);
+
+  useEffect(() => {
+    activeStaffAccountRef.current = activeStaffAccount;
+  }, [activeStaffAccount]);
+
+  const isTableAssignedToWaiter = (tableNumber: number): boolean => {
+    const staff = activeStaffAccountRef.current;
+    if (!staff || staff.role !== 'waiter') return false;
+    return Array.isArray(staff.assigned_tables) && staff.assigned_tables.includes(tableNumber);
+  };
 
   // Helper to check which screen the user is currently viewing
   const getScreenContext = (): 'customer' | 'waiter' | 'admin' | 'kitchen' | 'auth' => {
@@ -706,7 +788,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'customer';
   };
 
-  // Trigger NEW ORDER alert — STRICTLY ONLY on Waiter screen (/waiter)
+  // Trigger NEW ORDER alert — STRICTLY ONLY on Waiter screen (/waiter) for assigned tables
   const notifyNewOrder = useCallback(
     (order: {
       id: string;
@@ -717,6 +799,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }) => {
       const screen = getScreenContext();
       if (screen !== 'waiter') return;
+      if (!isTableAssignedToWaiter(order.table_number)) return;
 
       const key = `${order.id}_created`;
       if (handledNewOrdersRef.current.has(key)) return;
@@ -800,11 +883,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [addToast]
   );
 
-  // Trigger kitchen ready alert (Waiter & Admin only, never Customer or Login)
+  // Trigger kitchen ready alert (Waiter for assigned tables & Admin only)
   const notifyKitchenReady = useCallback(
     (order: { id: string; order_number?: string; table_number: number }) => {
       const screen = getScreenContext();
       if (screen !== 'waiter' && screen !== 'admin') return;
+      if (screen === 'waiter' && !isTableAssignedToWaiter(order.table_number)) return;
 
       const key = `${order.id}_ready`;
       if (handledTransitionsRef.current.has(key)) return;
@@ -833,11 +917,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [addToast]
   );
 
-  // Trigger kitchen preparing alert (Waiter only)
+  // Trigger kitchen preparing alert (Waiter only, assigned tables)
   const notifyKitchenPreparing = useCallback(
     (order: { id: string; order_number?: string; table_number: number }) => {
       const screen = getScreenContext();
       if (screen !== 'waiter') return;
+      if (!isTableAssignedToWaiter(order.table_number)) return;
 
       const key = `${order.id}_preparing`;
       if (handledTransitionsRef.current.has(key)) return;
@@ -860,8 +945,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   // Trigger customer call alert:
-  // - 1st call: ONLY notifies Waiter screen (/waiter)
-  // - 2+ calls or accumulated calls (escalated_to_admin): notifies Waiter AND escalates to Admin (/admin)
+  // - 1st & 2nd calls: ONLY notifies Waiter screen (/waiter)
+  // - 3rd+ call (escalated_to_admin): notifies Waiter AND escalates to Admin (/admin)
   const notifyCustomerCall = useCallback(
     (call: {
       id: string;
@@ -875,19 +960,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const screen = getScreenContext();
       // Never show staff call popups on Customer, Kitchen, or Login screens
       if (screen !== 'waiter' && screen !== 'admin') return;
+      if (screen === 'waiter' && !isTableAssignedToWaiter(call.table_number)) return;
 
       const count = call.call_count || 1;
-      const isEscalated = Boolean(call.escalated_to_admin || count >= 2);
+      const isEscalated = Boolean(call.escalated_to_admin || count >= 3);
       const dedupeKey = `${call.id}_c${count}_${screen}`;
       if (handledCallsRef.current.has(dedupeKey)) return;
       handledCallsRef.current.add(dedupeKey);
 
       const isBill = call.type === 'bill';
 
-      // On Admin screen: ONLY notify if escalated (waiter didn't come / called 2+ times / calls accumulated)
+      // On Admin screen: ONLY notify after 2 calls (on the 3rd+ call)
       if (screen === 'admin') {
         if (!isEscalated) {
-          return; // 1st call goes ONLY to Waiter!
+          return; // 1st & 2nd calls go ONLY to Waiter!
         }
         soundService.playWaiterAlert();
         addToast(
@@ -911,17 +997,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // On Waiter screen (/waiter): Always notify on 1st call and subsequent calls
+      // On Waiter screen (/waiter): Always notify on 1st, 2nd, and 3rd+ calls
       soundService.playWaiterAlert();
       addToast(
         'customer_call',
         isEscalated
           ? `SHOSHILINCH (${count}-marta): Stol №${call.table_number}`
+          : count === 2
+          ? `Qayta chaqiruv (2-marta): Stol №${call.table_number}`
           : isBill
           ? `Hisob so'raldi: Stol №${call.table_number}`
           : `Ofitsiant chaqiruvi: Stol №${call.table_number}`,
         isEscalated
           ? `Mijoz ${count}-marta chaqirmoqda! Kechikish haqida Adminga ham xabar yuborildi!`
+          : count === 2
+          ? `Mijoz 2-marta chaqirmoqda. 3-chaqiruvda Adminga xabar yuboriladi!`
           : call.note ||
               (isBill
                 ? `Stol №${call.table_number} to'lov hisob varaqasini so'radi.`
@@ -944,11 +1034,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [addToast]
   );
 
-  // Test simulation for waiters
+  // Test simulation for waiters (strictly uses assigned tables)
   const simulateWaiterNotification = useCallback(
     (type: 'new_order' | 'kitchen_ready' | 'customer_call') => {
       void soundService.unlockAudio();
-      const randomTable = Math.floor(Math.random() * 25) + 1;
+      const assigned = activeStaffAccountRef.current?.assigned_tables || [];
+      if (assigned.length === 0) {
+        addToast(
+          'info',
+          'Stol biriktirilmagan',
+          "Sinov bildirishnomasi uchun avval Administrator sizga kamida bitta stol biriktirishi kerak."
+        );
+        return;
+      }
+      const randomTable = assigned[Math.floor(Math.random() * assigned.length)];
       if (type === 'new_order') {
         notifyNewOrder({
           id: 'test-new-order-' + Date.now(),
@@ -972,7 +1071,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
     },
-    [notifyNewOrder, notifyKitchenReady, notifyCustomerCall]
+    [addToast, notifyNewOrder, notifyKitchenReady, notifyCustomerCall]
   );
 
   // Fetch all live data
@@ -1291,6 +1390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           cashbackUsed: safeCashbackUsed,
           cashbackEarned: expectedCashbackEarned,
           customerAccountId: customerAccount?.id,
+          guestSessionId: customerAccount ? undefined : guestSessionId,
           customerName: customerAccount?.full_name,
         });
 
@@ -1318,8 +1418,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         throw err;
       }
     },
-    [cart, activeTableNumber, customerAccount, clearCart, refreshData]
+    [cart, activeTableNumber, customerAccount, guestSessionId, clearCart, refreshData]
   );
+
+  // Scoped customer order history:
+  // - Logged-in account: FULL permanent order history belonging strictly to this account across visits & tables
+  // - Guest mode: ONLY current session's unsettled orders at this table (disappears on bill settlement or exit/re-entry)
+  const customerOrders = useMemo(() => {
+    if (customerAccount) {
+      return orders
+        .filter((o) => o.customer_account_id === customerAccount.id)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    if (!guestSessionId) return [];
+    return orders
+      .filter(
+        (o) =>
+          !o.is_settled &&
+          !o.customer_account_id &&
+          o.table_number === activeTableNumber &&
+          o.guest_session_id === guestSessionId
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [orders, customerAccount, activeTableNumber, guestSessionId]);
+
+  // Automatically clear guest history & rotate guest session once Waiter/Admin settles their check
+  useEffect(() => {
+    if (customerAccount || !guestSessionId) return;
+    const myGuestOrders = orders.filter((o) => o.guest_session_id === guestSessionId);
+    if (myGuestOrders.length > 0 && myGuestOrders.every((o) => Boolean(o.is_settled))) {
+      const freshId = customerAccountService.resetGuestSessionId();
+      setGuestSessionId(freshId);
+      setCart([]);
+    }
+  }, [orders, customerAccount, guestSessionId]);
 
   // Cancel order strictly while it has 1 tick (status === 'new') before waiter acceptance
   // Cancelled orders NEVER earn cashback; any spent cashback is refunded.
@@ -1430,6 +1562,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { account, transactions } = await customerAccountService.updateAccount(customerAccount, params);
       setCustomerAccount(account);
       setCustomerTransactions(transactions);
+      setAllCustomerAccounts((prev) => [
+        account,
+        ...prev.filter((a) => a.id !== account.id && a.id !== customerAccount.id),
+      ]);
       soundService.playSuccess();
       refreshData();
       return account;
@@ -1443,11 +1579,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLastResolvedCall(null);
       const call = await dataService.requestService(activeTableNumber, 'waiter', note);
       const count = call.call_count || 1;
-      if (count >= 2 || call.escalated_to_admin) {
+      if (count >= 3 || call.escalated_to_admin) {
         addToast(
           'waiter_response',
           `Ofitsiant qayta chaqirildi (${count}-marta)`,
           `Ofitsiant kelmagani sababli Bosh administratorga ham xabar yuborildi.`,
+          {
+            tableNumber: activeTableNumber,
+            callCount: count,
+            waiterName: call.assigned_waiter_name,
+          }
+        );
+      } else if (count === 2) {
+        addToast(
+          'waiter_response',
+          'Ofitsiant qayta chaqirildi (2-marta)',
+          `${call.assigned_waiter_name || 'Ofitsiant'} ekraniga qayta xabar yuborildi. 3-chaqiruvda administratorga xabar boradi.`,
           {
             tableNumber: activeTableNumber,
             callCount: count,
@@ -1705,6 +1852,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       menuItems,
       tables,
       orders,
+      customerOrders,
+      guestSessionId,
       serviceCalls,
       waiters,
       dishReviews,
@@ -1732,6 +1881,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateOrderStatus,
       settleAndFreeTable,
       customerAccount,
+      allCustomerAccounts,
+      refreshCustomerAccounts,
       customerTransactions,
       customerSessionMode,
       isCustomerAuthOpen,
@@ -1742,6 +1893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       loginCustomerAccount,
       updateCustomerAccount,
       continueAsGuest,
+      endGuestSession,
       logoutCustomerAccount,
       staffAccounts,
       activeStaffAccount,
@@ -1789,6 +1941,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       menuItems,
       tables,
       orders,
+      customerOrders,
+      guestSessionId,
       serviceCalls,
       waiters,
       dishReviews,
@@ -1816,6 +1970,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateOrderStatus,
       settleAndFreeTable,
       customerAccount,
+      allCustomerAccounts,
+      refreshCustomerAccounts,
       customerTransactions,
       customerSessionMode,
       isCustomerAuthOpen,
@@ -1826,6 +1982,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       loginCustomerAccount,
       updateCustomerAccount,
       continueAsGuest,
+      endGuestSession,
       logoutCustomerAccount,
       staffAccounts,
       activeStaffAccount,
@@ -1919,7 +2076,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
 
           if (toast.type === 'waiter_response') {
-            const isEscalated = (toast.callCount || 0) >= 2;
+            const isEscalated = (toast.callCount || 0) >= 3;
             return (
               <div
                 key={toast.id}
@@ -2049,7 +2206,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           </span>
                         )}
                         <span className="text-[10px] font-bold uppercase tracking-wider text-red-900 bg-red-100 px-2 py-0.5 rounded-md border border-red-300">
-                          Admin Eskalatsiyasi ({toast.callCount || 2}x)
+                          Admin Eskalatsiyasi ({toast.callCount || 3}x)
                         </span>
                       </div>
                       <h4 className="text-sm font-bold text-slate-900 mt-1">{toast.title}</h4>

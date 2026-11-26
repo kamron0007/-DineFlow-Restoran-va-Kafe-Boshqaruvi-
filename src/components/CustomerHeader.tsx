@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useLiveClock } from '../hooks/useLiveClock';
-import { Bell, BellRing, CheckCircle2, ShoppingBag, Clock, Wallet, User } from 'lucide-react';
+import { Bell, BellRing, CheckCircle2, ShoppingBag, Clock, Wallet, User, Receipt } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BrandLogo } from './BrandLogo';
 import { WaiterCallIndicator } from './WaiterCallIndicator';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { formatPrice } from '../utils/formatters';
 
 export const CustomerHeader: React.FC = () => {
@@ -12,6 +13,7 @@ export const CustomerHeader: React.FC = () => {
     activeTableNumber,
     callWaiter,
     cartItemCount,
+    customerOrders,
     serviceCalls,
     lastResolvedCall,
     customerAccount,
@@ -20,6 +22,8 @@ export const CustomerHeader: React.FC = () => {
   const { timeString } = useLiveClock();
   const [isCalling, setIsCalling] = useState(false);
   const navigate = useNavigate();
+
+  const myOrdersCount = customerOrders.length;
 
   const activeCall = useMemo(() => {
     return (
@@ -34,7 +38,7 @@ export const CustomerHeader: React.FC = () => {
   );
 
   const isEscalated = Boolean(
-    activeCall && ((activeCall.call_count || 1) >= 2 || activeCall.escalated_to_admin)
+    activeCall && ((activeCall.call_count || 1) >= 3 || activeCall.escalated_to_admin)
   );
 
   const handleCallWaiter = async () => {
@@ -135,6 +139,23 @@ export const CustomerHeader: React.FC = () => {
               )}
             </button>
 
+            {/* 1-Tap Order History Button */}
+            <button
+              type="button"
+              onClick={() => navigate('/orders')}
+              className="relative min-h-[42px] px-3 sm:px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/18 border border-white/15 text-white active:scale-95 transition-all shrink-0 flex items-center justify-center gap-1.5 text-xs font-bold whitespace-nowrap"
+              title="Oldingi va faol buyurtmalar tarixi"
+              aria-label="Buyurtmalar tarixi"
+            >
+              <Receipt className="w-4 h-4 text-[#F59E0B]" />
+              <span className="hidden lg:inline">Buyurtmalar</span>
+              {myOrdersCount > 0 && (
+                <span className="bg-[#F59E0B] text-[#173F35] text-[10px] font-extrabold min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center shadow tabular-nums">
+                  {myOrdersCount}
+                </span>
+              )}
+            </button>
+
             {/* Cart Button */}
             <button
               type="button"
@@ -150,6 +171,9 @@ export const CustomerHeader: React.FC = () => {
                 </span>
               )}
             </button>
+
+            {/* Circular Flag Language Switcher */}
+            <LanguageSwitcher theme="dark" />
           </div>
         </div>
       </header>

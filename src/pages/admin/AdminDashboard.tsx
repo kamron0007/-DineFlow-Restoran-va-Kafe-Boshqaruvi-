@@ -27,6 +27,7 @@ import {
   Pause,
   BarChart2,
   Users,
+  UserCheck,
   Star,
   Award,
   AlertTriangle,
@@ -63,6 +64,7 @@ export const AdminDashboard: React.FC = () => {
     categories,
     menuItems,
     tables,
+    allCustomerAccounts,
     serviceCalls,
     waiters,
     dishReviews,
@@ -140,9 +142,9 @@ export const AdminDashboard: React.FC = () => {
   }, [isPlaying, period, ALL_HOURS]);
 
   const allPendingCalls = serviceCalls.filter((c) => c.status === 'pending');
-  // Admin only sees calls if waiter didn't respond (called 2+ times) OR 3+ tables are waiting at once ("ko'payib ketsa")
+  // Admin only sees calls after 2 waiter-only calls (on the 3rd+ call)
   const escalatedCalls = allPendingCalls.filter(
-    (c) => (c.call_count || 1) >= 2 || c.escalated_to_admin || allPendingCalls.length >= 3
+    (c) => (c.call_count || 1) >= 3 || c.escalated_to_admin
   );
 
   const exportReport = () => {
@@ -220,6 +222,14 @@ export const AdminDashboard: React.FC = () => {
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5 text-[#F59E0B]" />
                     <span>CSV Eksport</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin/customers')}
+                    className="min-h-[42px] px-4 py-2 rounded-full bg-white/10 hover:bg-white/18 border border-white/18 text-white text-xs sm:text-[13px] font-semibold flex items-center gap-1.5 transition-all"
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>Mijozlar ({allCustomerAccounts.length})</span>
                   </button>
                   <button
                     type="button"
@@ -311,7 +321,7 @@ export const AdminDashboard: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="bg-red-600 text-white text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md">
-                          Admin Eskalatsiyasi • {call.call_count || 2}-marta chaqiruv
+                          Admin Eskalatsiyasi • {call.call_count || 3}-marta chaqiruv
                         </span>
                         <h4 className="font-display font-bold text-sm text-red-950">
                           Stol №{call.table_number} ga ofitsiant bormadi!

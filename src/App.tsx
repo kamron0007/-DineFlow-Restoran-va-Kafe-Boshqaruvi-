@@ -5,7 +5,9 @@
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { LanguageProvider } from './context/LanguageContext';
 import { AppProvider, useApp } from './context/AppContext';
+import { LanguageEntryModal } from './components/LanguageEntryModal';
 import { StaffAccountRole } from './types';
 import { MenuPage } from './pages/customer/MenuPage';
 import { CartPage } from './pages/customer/CartPage';
@@ -24,6 +26,7 @@ import { ExportReportsPage } from './pages/admin/ExportReportsPage';
 import { MarketBenchmarkPage } from './pages/admin/MarketBenchmarkPage';
 import { SettingsPage } from './pages/admin/SettingsPage';
 import { StaffManagementPage } from './pages/admin/StaffManagementPage';
+import { CustomersManagementPage } from './pages/admin/CustomersManagementPage';
 import { KitchenEfficiencyPage } from './pages/admin/KitchenEfficiencyPage';
 import { LoginPage } from './pages/auth/LoginPage';
 
@@ -59,8 +62,9 @@ const StaffProtectedRoute: React.FC<StaffProtectedRouteProps> = ({ requiredRole,
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppProvider>
+    <LanguageProvider>
+      <BrowserRouter>
+        <AppProvider>
         <Routes>
           {/* Root / opens Staff & Admin Login/Register Portal; QR codes go straight to /t/:tableNum */}
           <Route path="/" element={<LoginPage />} />
@@ -159,6 +163,14 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/customers"
+            element={
+              <StaffProtectedRoute requiredRole="admin">
+                <CustomersManagementPage />
+              </StaffProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/waiters"
             element={
               <StaffProtectedRoute requiredRole="admin">
@@ -198,9 +210,13 @@ export default function App() {
         {/* Customer Personal Cabinet / 1st-time Guest Auth Modal */}
         <CustomerAuthModal />
 
-        {/* Staff Account Create / Edit Modal (Admin, Waiter, Chef) */}
-        <StaffAccountModal />
-      </AppProvider>
-    </BrowserRouter>
+          {/* Staff Account Create / Edit Modal (Admin, Waiter, Chef) */}
+          <StaffAccountModal />
+
+          {/* First-Entry Language Picker (Customer, Admin, Waiter, Chef) */}
+          <LanguageEntryModal />
+        </AppProvider>
+      </BrowserRouter>
+    </LanguageProvider>
   );
 }

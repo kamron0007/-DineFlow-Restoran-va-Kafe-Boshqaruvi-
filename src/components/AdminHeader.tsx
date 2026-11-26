@@ -1,17 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useApp } from '../context/AppContext';
+import { useLiveClock } from '../hooks/useLiveClock';
 import { Bell, Volume2, VolumeX, User, ChefHat, UserCheck, Utensils, Clock, Pencil, LogOut } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { STAFF_ROLE_LABELS } from '../services/staffAccount';
-
-const MONTH_NAMES_UZ = [
-  'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
-  'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr',
-];
-
-const WEEKDAY_NAMES_UZ = [
-  'Yakshanba', 'Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba',
-];
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 export const AdminHeader: React.FC = () => {
   const {
@@ -33,22 +26,8 @@ export const AdminHeader: React.FC = () => {
     staffAccounts.find((a) => a.role === 'admin') ||
     null;
 
-  // Live real-time clock
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  const timeString = `${hours}:${minutes}:${seconds}`;
-
-  const day = now.getDate();
-  const monthName = MONTH_NAMES_UZ[now.getMonth()];
-  const weekday = WEEKDAY_NAMES_UZ[now.getDay()];
-  const dateString = `${weekday}, ${day}-${monthName}`;
+  const { timeString, weekday, shortDate } = useLiveClock();
+  const dateString = `${weekday}, ${shortDate}`;
 
   const busyTablesCount = new Set(
     orders
@@ -58,7 +37,7 @@ export const AdminHeader: React.FC = () => {
 
   const allPendingCalls = serviceCalls.filter((c) => c.status === 'pending');
   const escalatedCalls = allPendingCalls.filter(
-    (c) => (c.call_count || 1) >= 2 || c.escalated_to_admin || allPendingCalls.length >= 3
+    (c) => (c.call_count || 1) >= 3 || c.escalated_to_admin
   );
   const escalatedCallsCount = escalatedCalls.length;
 
@@ -147,6 +126,9 @@ export const AdminHeader: React.FC = () => {
         >
           {soundEnabled ? <Volume2 className="w-4 h-4 text-[#1E5245]" /> : <VolumeX className="w-4 h-4" />}
         </button>
+
+        {/* Circular Flag Language Switcher */}
+        <LanguageSwitcher theme="light" />
 
         <div className="h-5 w-px bg-[#E5E0D8] hidden sm:block shrink-0" />
 

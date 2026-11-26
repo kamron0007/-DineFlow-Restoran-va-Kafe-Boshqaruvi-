@@ -6,6 +6,7 @@ import {
   deleteDoc,
   collection,
   getDocs,
+  onSnapshot,
   query,
   where,
   limit,
@@ -116,6 +117,60 @@ class StaffAccountService {
 
   public getCachedStaffAccounts(): StaffAccount[] {
     return readLocalStaff();
+  }
+
+  public subscribeStaffAccounts(onUpdate: (accounts: StaffAccount[]) => void): () => void {
+    if (typeof window === 'undefined') return () => {};
+    const roles: StaffAccountRole[] = ['admin', 'waiter', 'kitchen'];
+    const roleDocs = new Map<StaffAccountRole, StaffAccount[]>();
+
+    const emitMerged = () => {
+      const local = readLocalStaff();
+      const map = new Map<string, StaffAccount>();
+      local.forEach((a) => map.set(a.id, a));
+
+      roleDocs.forEach((list) => {
+        list.forEach((remote) => {
+          const existing = map.get(remote.id);
+          if (
+            !existing ||
+            new Date(remote.updated_at).getTime() >= new Date(existing.updated_at).getTime()
+          ) {
+            map.set(remote.id, {
+              ...remote,
+              phone_local: existing?.phone_local,
+            });
+          }
+        });
+      });
+
+      const merged = Array.from(map.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      writeLocalStaff(merged);
+      onUpdate(merged);
+    };
+
+    const unsubscribers = roles.map((r) => {
+      const q = query(collection(db, 'staff_accounts'), where('role', '==', r), limit(50));
+      return onSnapshot(
+        q,
+        (snap) => {
+          roleDocs.set(
+            r,
+            snap.docs.map((d) => d.data() as StaffAccount)
+          );
+          emitMerged();
+        },
+        (error) => {
+          console.error(`Firestore staff_accounts (${r}) onSnapshot error:`, error);
+        }
+      );
+    });
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
   }
 
   public getActiveStaffAccount(): StaffAccount | null {

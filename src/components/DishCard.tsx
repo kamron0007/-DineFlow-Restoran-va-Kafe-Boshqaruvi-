@@ -3,6 +3,7 @@ import { MenuItem } from '../types';
 import { formatUZS } from '../utils/formatters';
 import { Plus, Minus, Clock, Utensils, Check, Star, ClipboardList } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useLanguage } from '../context/LanguageContext';
 import { DishModalTab } from './DishDetailModal';
 
 interface DishCardProps {
@@ -12,6 +13,8 @@ interface DishCardProps {
 
 export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect }) => {
   const { cart, addToCart, updateCartQuantity, getDishRating } = useApp();
+  const { localizeDish } = useLanguage();
+  const displayDish = useMemo(() => localizeDish(dish), [dish, localizeDish]);
   const [imageError, setImageError] = useState(false);
   const [imgSrc, setImgSrc] = useState<string>(() => {
     return dish.image_url || `/images/dishes/${dish.id}.jpg`;
@@ -77,7 +80,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
           {imgSrc && !imageError ? (
             <img
               src={imgSrc}
-              alt={dish.name}
+              alt={displayDish.name}
               loading="lazy"
               decoding="async"
               referrerPolicy="no-referrer"
@@ -90,7 +93,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
                 <Utensils className="w-5 h-5" />
               </div>
               <span className="text-xs font-medium text-[#59635E] line-clamp-1">
-                {dish.name}
+                {displayDish.name}
               </span>
             </div>
           )}
@@ -127,7 +130,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
 
         {/* Dish Title */}
         <h3 className="font-display font-bold text-base sm:text-[17px] text-[#173F35] group-hover:text-[#1E5245] transition-colors line-clamp-1">
-          {dish.name}
+          {displayDish.name}
         </h3>
 
         {/* Clean Unboxed Metadata Row */}
@@ -172,7 +175,7 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
         </div>
 
         <p className="text-[13px] text-[#59635E] line-clamp-2 leading-relaxed mb-4">
-          {dish.description}
+          {displayDish.description}
         </p>
       </div>
 
@@ -182,8 +185,8 @@ export const DishCard: React.FC<DishCardProps> = React.memo(({ dish, onSelect })
           <span className="font-display font-bold text-base text-[#173F35] tabular-nums">
             {formatUZS(dish.price)}
           </span>
-          {dish.weight_or_portion && (
-            <span className="text-xs text-[#737A75] truncate">{dish.weight_or_portion}</span>
+          {displayDish.weight_or_portion && (
+            <span className="text-xs text-[#737A75] truncate">{displayDish.weight_or_portion}</span>
           )}
         </div>
 

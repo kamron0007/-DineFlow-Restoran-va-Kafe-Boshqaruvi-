@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { formatUZS, formatTimeAgo, formatShortTime, ORDER_STATUS_MAP } from '../../utils/formatters';
@@ -19,6 +20,9 @@ import {
   CheckCheck,
   XCircle,
   Lock,
+  RotateCcw,
+  LogOut,
+  UserPlus,
 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CustomerFeedbackModal } from '../../components/CustomerFeedbackModal';
@@ -50,33 +54,67 @@ const STATUS_STEPS: { key: OrderStatus; label: string; desc: string }[] = [
 
 export const OrderTrackPage: React.FC = () => {
   const {
-    orders,
+    customerOrders,
     menuItems,
     activeTableNumber,
+    customerAccount,
+    openCustomerAuth,
+    endGuestSession,
+    addToCart,
     callWaiter,
     requestBill,
     getDishRating,
     cancelCustomerOrder,
   } = useApp();
+  const { localizeOrderItem } = useLanguage();
   const [searchParams] = useSearchParams();
   const urlOrderId = searchParams.get('orderId');
   const navigate = useNavigate();
   const { timeString, dateString } = useLiveClock();
 
-  // Find all orders for this table
-  const tableOrders = useMemo(() => {
-    return orders.filter((o) => o.table_number === activeTableNumber);
-  }, [orders, activeTableNumber]);
+  // Scoped customer orders:
+  // - Account: permanent full personal history across visits & tables
+  // - Guest: ONLY unsettled orders from this active guest session
+  const tableOrders = customerOrders;
+
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'delivered' | 'cancelled'>('all');
+
+  const filteredHistoryOrders = useMemo(() => {
+    return tableOrders.filter((o) => {
+      if (historyFilter === 'active') {
+        return o.status === 'new' || o.status === 'preparing' || o.status === 'ready';
+      }
+      if (historyFilter === 'delivered') return o.status === 'delivered';
+      if (historyFilter === 'cancelled') return o.status === 'cancelled';
+      return true;
+    });
+  }, [tableOrders, historyFilter]);
 
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(urlOrderId);
 
   useEffect(() => {
     if (urlOrderId) {
       setSelectedOrderId(urlOrderId);
-    } else if (tableOrders.length > 0) {
+    } else if (tableOrders.length > 0 && !selectedOrderId) {
       setSelectedOrderId(tableOrders[0].id);
     }
-  }, [urlOrderId, tableOrders]);
+  }, [urlOrderId, tableOrders, selectedOrderId]);
+
+  const handleReorder = (orderId: string) => {
+    const ord = tableOrders.find((o) => o.id === orderId);
+    if (!ord) return;
+    let addedAny = false;
+    ord.items.forEach((it) => {
+      const dish = menuItems.find((m) => m.id === it.menu_item_id && m.is_available);
+      if (dish) {
+        addToCart(dish, it.quantity, it.item_note || undefined);
+        addedAny = true;
+      }
+    });
+    if (addedAny) {
+      navigate('/cart');
+    }
+  };
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState<boolean>(false);
   const [dishToRate, setDishToRate] = useState<MenuItem | null>(null);
@@ -464,7 +502,9 @@ export const OrderTrackPage: React.FC = () => {
                           {item.quantity}x
                         </span>
                         <div className="min-w-0">
-                          <span className="font-semibold text-[#202622] block">{item.item_name}</span>
+                          <span className="font-semibold text-[#202622] block">
+                            {localizeOrderItem(item.item_name, item.menu_item_id, menuItems)}
+                          </span>
                           {item.item_note && (
                             <span className="text-[11px] text-amber-800 block mt-0.5">
                               Talabnoma: <span className="italic">&ldquo;{item.item_note}&rdquo;</span>
@@ -543,39 +583,215 @@ export const OrderTrackPage: React.FC = () => {
               )}
             </div>
 
-            {/* Multiple orders switcher */}
-            {tableOrders.length > 1 && (
-              <div className="bg-white rounded-3xl border border-[#E5E0D8] p-4 sm:p-5 shadow-xs">
-                <h4 className="font-display font-bold text-xs text-[#737A75] mb-2.5 uppercase tracking-wider">
-                  Ushbu stoldagi boshqa buyurtmalar:
-                </h4>
-                <div className="space-y-2">
-                  {tableOrders.map((ord) => (
-                    <button
-                      key={ord.id}
-                      type="button"
-                      onClick={() => setSelectedOrderId(ord.id)}
-                      className={`w-full p-3 rounded-2xl text-xs flex items-center justify-between border transition-all ${
-                        ord.id === activeOrder.id
-                          ? 'bg-[#E8F0EC] border-[#173F35] font-bold text-[#173F35]'
-                          : 'bg-[#FAF8F3] border-transparent hover:border-[#E5E0D8] text-[#202622]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <OrderTickBadge status={ord.status} compact />
-                        <span className="font-mono shrink-0">{ord.order_number}</span>
-                        <span className="text-[10px] font-mono text-[#737A75] truncate">
-                          {formatRealDateTime(ord.created_at)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono tabular-nums font-bold">{formatUZS(ord.total_amount)}</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-[#737A75]" />
-                      </div>
-                    </button>
-                  ))}
+            {/* Guest Session Retention Notice (History cleared on bill settlement or exit) */}
+            {!customerAccount && (
+              <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs text-amber-950 leading-relaxed">
+                  <p className="font-bold">Mehmon rejimi — vaqtinchalik tarix</p>
+                  <p className="text-amber-900/85 mt-0.5">
+                    Bu buyurtmalar faqat chek (hisob) yopilgunicha ko&apos;rinadi. Chiqib qayta kirsangiz yoki hisob yopilgach tarix o&apos;chadi. Doimiy saqlash uchun akkaunt oching.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => openCustomerAuth('register')}
+                    className="min-h-[36px] px-3.5 py-1.5 rounded-full bg-[#173F35] hover:bg-[#1E5245] text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>Akkaunt ochish</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      endGuestSession(true);
+                      navigate(`/t/${activeTableNumber}`);
+                    }}
+                    className="min-h-[36px] px-3.5 py-1.5 rounded-full bg-white hover:bg-red-50 text-red-700 border border-red-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Chiqish</span>
+                  </button>
                 </div>
               </div>
+            )}
+
+            {/* Complete Customer Order History (Every Dish, Exact Time, Delivered vs Cancelled Status) */}
+            {tableOrders.length > 0 && (
+              <section className="bg-white rounded-3xl border border-[#E5E0D8] p-5 sm:p-6 shadow-[0_8px_28px_-18px_rgba(23,63,53,0.14)] space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-display font-extrabold text-base sm:text-lg text-[#173F35]">
+                      {customerAccount
+                        ? `Barcha buyurtmalar tarixi (${tableOrders.length})`
+                        : `Joriy chek buyurtmalari (${tableOrders.length})`}
+                    </h3>
+                    <p className="text-xs text-[#59635E] mt-0.5">
+                      {customerAccount
+                        ? "Akkauntingizda doimiy saqlangan barcha taomlar, aniq vaqti va holati"
+                        : "Hozirgi tashrifingizdagi barcha taomlar (chek yopilgunicha saqlanadi)"}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                    {(
+                      [
+                        { id: 'all', label: `Barchasi (${tableOrders.length})` },
+                        {
+                          id: 'active',
+                          label: `Faol (${tableOrders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled').length})`,
+                        },
+                        {
+                          id: 'delivered',
+                          label: `Olindi (${tableOrders.filter((o) => o.status === 'delivered').length})`,
+                        },
+                        {
+                          id: 'cancelled',
+                          label: `Bekor (${tableOrders.filter((o) => o.status === 'cancelled').length})`,
+                        },
+                      ] as const
+                    ).map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setHistoryFilter(tab.id)}
+                        className={`min-h-[34px] px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition-colors ${
+                          historyFilter === tab.id
+                            ? 'bg-[#173F35] text-white'
+                            : 'bg-[#FAF8F3] text-[#59635E] border border-[#E5E0D8] hover:border-[#173F35]'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {filteredHistoryOrders.length === 0 ? (
+                  <p className="text-xs text-[#737A75] text-center py-6 bg-[#FAF8F3] rounded-2xl border border-[#E5E0D8]">
+                    Ushbu toifada buyurtmalar topilmadi.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredHistoryOrders.map((ord) => {
+                      const isSelected = ord.id === activeOrder.id;
+                      const isDelivered = ord.status === 'delivered';
+                      const isCancelled = ord.status === 'cancelled';
+
+                      return (
+                        <div
+                          key={ord.id}
+                          onClick={() => {
+                            setSelectedOrderId(ord.id);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#E8F0EC]/70 border-[#173F35] shadow-xs'
+                              : isCancelled
+                              ? 'bg-red-50/30 border-red-200/70 hover:border-red-300'
+                              : 'bg-[#FAF8F3] border-[#E5E0D8] hover:border-[#173F35]/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2 flex-wrap pb-2.5 border-b border-[#E5E0D8]/70">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-extrabold text-sm text-[#173F35]">
+                                  {ord.order_number}
+                                </span>
+                                <span className="text-[11px] font-semibold text-[#59635E]">
+                                  · Stol №{ord.table_number}
+                                </span>
+                                <OrderTickBadge status={ord.status} compact />
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#59635E] mt-1 tabular-nums">
+                                <Clock className="w-3 h-3 text-[#1E5245]" />
+                                <span>{formatRealDateTime(ord.created_at)}</span>
+                                <span className="font-sans text-[#737A75]">
+                                  ({formatTimeAgo(ord.created_at)})
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              {isDelivered ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Olindi (Yetkazildi)</span>
+                                </span>
+                              ) : isCancelled ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700 border border-red-200">
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Bekor qilindi</span>
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                                    ORDER_STATUS_MAP[ord.status]?.badgeBg || 'bg-amber-100 text-amber-800'
+                                  }`}
+                                >
+                                  {ORDER_STATUS_MAP[ord.status]?.label || ord.status}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Complete itemized dishes in this order */}
+                          <div className="py-2.5 space-y-1.5">
+                            {ord.items.map((it) => (
+                              <div key={it.id} className="flex items-start justify-between gap-2 text-xs">
+                                <div className="min-w-0">
+                                  <span className="text-[#202622] font-medium">
+                                    <strong className="font-mono text-[#173F35]">{it.quantity}×</strong>{' '}
+                                    {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
+                                  </span>
+                                  {it.item_note && (
+                                    <span className="block text-[11px] text-amber-800 italic">
+                                      &ldquo;{it.item_note}&rdquo;
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="font-mono font-semibold text-[#59635E] tabular-nums shrink-0">
+                                  {formatUZS(it.line_total)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="pt-2.5 border-t border-[#E5E0D8]/70 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-[#737A75]">Jami:</span>
+                              <span className="font-mono font-extrabold text-[#173F35] tabular-nums">
+                                {formatUZS(ord.total_amount)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {(isDelivered || isCancelled) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReorder(ord.id);
+                                  }}
+                                  className="min-h-[32px] px-3 py-1 rounded-full bg-[#173F35] hover:bg-[#1E5245] text-white text-[11px] font-bold flex items-center gap-1 transition-colors"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-[#F59E0B]" />
+                                  <span>Qayta buyurtma</span>
+                                </button>
+                              )}
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1E5245]">
+                                <span>{isSelected ? 'Tanlangan' : "Ko'rish"}</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             )}
           </div>
         ) : (
@@ -584,18 +800,31 @@ export const OrderTrackPage: React.FC = () => {
               <Utensils className="w-8 h-8" />
             </div>
             <h2 className="font-display font-bold text-xl text-[#202622] mb-1.5">
-              Faol buyurtma topilmadi
+              {customerAccount ? 'Buyurtmalar tarixi hozircha bo\'sh' : 'Joriy buyurtma topilmadi'}
             </h2>
-            <p className="text-xs text-[#59635E] max-w-xs mx-auto mb-6 leading-relaxed">
-              Stol №{activeTableNumber} uchun hozircha hech qanday buyurtma berilmagan.
+            <p className="text-xs text-[#59635E] max-w-sm mx-auto mb-6 leading-relaxed">
+              {customerAccount
+                ? "Akkauntingiz orqali bergan barcha buyurtmalaringiz shu yerda to'liq saqlanib boradi."
+                : `Mehmon rejimida faqat hozirgi chek yopilgunicha berilgan buyurtmalar ko'rinadi. Tarixingiz doimiy saqlanishi uchun akkaunt ochishingiz mumkin.`}
             </p>
-            <button
-              type="button"
-              onClick={() => navigate(`/t/${activeTableNumber}`)}
-              className="min-h-[46px] py-3 px-7 rounded-full bg-[#173F35] text-white text-xs font-bold hover:bg-[#1E5245] transition-all shadow-sm"
-            >
-              Menyuni ko&apos;rish
-            </button>
+            <div className="flex items-center justify-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => navigate(`/t/${activeTableNumber}`)}
+                className="min-h-[46px] py-3 px-7 rounded-full bg-[#173F35] text-white text-xs font-bold hover:bg-[#1E5245] transition-all shadow-sm"
+              >
+                Menyuni ko&apos;rish
+              </button>
+              {!customerAccount && (
+                <button
+                  type="button"
+                  onClick={() => openCustomerAuth('choice')}
+                  className="min-h-[46px] py-3 px-6 rounded-full bg-[#F59E0B] text-[#173F35] text-xs font-extrabold hover:bg-[#FBBF24] transition-all"
+                >
+                  Akkaunt ochish / Kirish
+                </button>
+              )}
+            </div>
           </div>
         )}
       </main>

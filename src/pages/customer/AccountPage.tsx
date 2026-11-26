@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { OrderTickBadge } from '../../components/OrderTickBadge';
@@ -55,12 +56,15 @@ export const AccountPage: React.FC = () => {
   const {
     customerAccount,
     customerTransactions,
-    orders,
+    customerOrders,
+    menuItems,
     activeTableNumber,
     openCustomerAuth,
     updateCustomerAccount,
+    endGuestSession,
     logoutCustomerAccount,
   } = useApp();
+  const { localizeOrderItem } = useLanguage();
 
   const { timeString, dateString } = useLiveClock();
   const [activeTab, setActiveTab] = useState<'orders' | 'cashback'>('orders');
@@ -113,20 +117,8 @@ export const AccountPage: React.FC = () => {
     }
   };
 
-  // Show customer's personal orders + current table orders (deduped & sorted newest first)
-  const relevantOrders = useMemo(() => {
-    const map = new Map<string, (typeof orders)[number]>();
-    orders.forEach((o) => {
-      const isMine = Boolean(customerAccount && o.customer_account_id === customerAccount.id);
-      const isMyTable = o.table_number === activeTableNumber;
-      if (customerAccount ? isMine || isMyTable : isMyTable) {
-        map.set(o.id, o);
-      }
-    });
-    return Array.from(map.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }, [orders, customerAccount, activeTableNumber]);
+  // Scoped orders: Account -> permanent full history; Guest -> current session until check settled
+  const relevantOrders = customerOrders;
 
   const filteredOrders = useMemo(() => {
     return relevantOrders.filter((o) => {
@@ -220,7 +212,7 @@ export const AccountPage: React.FC = () => {
               to={`/orders?orderId=${ord.id}`}
               className="block bg-white rounded-2xl border border-[#E5E0D8] p-4 hover:border-[#173F35]/40 transition-colors"
             >
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono font-extrabold text-sm text-[#173F35]">
                     {ord.order_number}
@@ -229,7 +221,19 @@ export const AccountPage: React.FC = () => {
                     · Stol №{ord.table_number}
                   </span>
                 </div>
-                <OrderTickBadge status={ord.status} />
+                <div className="flex items-center gap-1.5">
+                  {ord.status === 'delivered' ? (
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      ✓ Olindi (Yetkazildi)
+                    </span>
+                  ) : ord.status === 'cancelled' ? (
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                      ✕ Bekor qilindi
+                    </span>
+                  ) : (
+                    <OrderTickBadge status={ord.status} />
+                  )}
+                </div>
               </div>
 
               {/* Exact Real Date + Time + Live Elapsed */}
@@ -241,10 +245,20 @@ export const AccountPage: React.FC = () => {
                 <span className="font-semibold text-[#173F35]">{formatTimeAgo(ord.created_at)}</span>
               </div>
 
-              {/* Dishes Preview */}
-              <p className="mt-2 text-xs text-[#202622] line-clamp-1">
-                {ord.items.map((it) => `${it.quantity}× ${it.item_name}`).join(', ')}
-              </p>
+              {/* Complete Ordered Dishes Breakdown */}
+              <div className="mt-2.5 pt-2 border-t border-[#F2EFE9] space-y-1">
+                {ord.items.map((it) => (
+                  <div key={it.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-[#202622]">
+                      <strong className="font-mono text-[#173F35]">{it.quantity}×</strong>{' '}
+                      {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
+                    </span>
+                    <span className="font-mono text-[#59635E] tabular-nums shrink-0">
+                      {formatPrice(it.line_total)}
+                    </span>
+                  </div>
+                ))}
+              </div>
 
               <div className="mt-2.5 pt-2.5 border-t border-[#F2EFE9] flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-[11px] flex-wrap">
@@ -347,9 +361,26 @@ export const AccountPage: React.FC = () => {
             </div>
 
             <div className="pt-1 space-y-2.5">
-              <h2 className="font-display font-bold text-lg text-[#202622]">
-                Stol №{activeTableNumber} buyurtmalar tarixi
-              </h2>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <h2 className="font-display font-bold text-lg text-[#202622]">
+                    Joriy tashrif buyurtmalari (Stol №{activeTableNumber})
+                  </h2>
+                  <p className="text-xs text-[#59635E]">
+                    Mehmon tarixi faqat chek yopilgunicha saqlanadi; chiqib qayta kirsangiz tozalanadi.
+                  </p>
+                </div>
+                {relevantOrders.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => endGuestSession(true)}
+                    className="min-h-[36px] px-3.5 py-1.5 rounded-full bg-white hover:bg-red-50 text-red-700 border border-red-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sessiyani yakunlash</span>
+                  </button>
+                )}
+              </div>
               {renderOrderHistorySection()}
             </div>
 

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { formatUZS, formatTimeAgo, formatShortTime, ORDER_STATUS_MAP } from '../../utils/formatters';
 import { Order, OrderStatus } from '../../types';
 import { useLiveClock } from '../../hooks/useLiveClock';
@@ -17,24 +18,23 @@ import {
   Check,
   ChefHat,
   HandPlatter,
-  Users,
+  Lock,
   Phone,
-  ShieldCheck,
   Wallet,
   Pencil,
-  UserPlus,
   LogOut,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { OrderTickBadge } from '../../components/OrderTickBadge';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 import { soundService } from '../../services/sound';
 
 export const WaiterDashboard: React.FC = () => {
   const {
     orders,
     tables,
+    menuItems,
     serviceCalls,
-    waiters,
     resolveServiceCall,
     updateOrderStatus,
     settleAndFreeTable,
@@ -46,22 +46,37 @@ export const WaiterDashboard: React.FC = () => {
     restaurantName,
     restaurantBranch,
     activeStaffAccount,
-    staffAccounts,
     openStaffAccountModal,
     logoutStaffAccount,
   } = useApp();
+  const { localizeOrderItem } = useLanguage();
   const navigate = useNavigate();
 
-  const activeWaiterAccount =
-    (activeStaffAccount?.role === 'waiter' ? activeStaffAccount : null) ||
-    staffAccounts.find((a) => a.role === 'waiter') ||
-    null;
+  const activeWaiterAccount = activeStaffAccount?.role === 'waiter' ? activeStaffAccount : null;
 
   const { timeString, dateString } = useLiveClock();
 
+  // Strictly enforce: Waiter sees ONLY their Admin-assigned tables
+  const assignedTables = useMemo(() => {
+    const raw = activeWaiterAccount?.assigned_tables || [];
+    return Array.from(new Set(raw)).sort((a, b) => a - b);
+  }, [activeWaiterAccount]);
+
+  const assignedTableSet = useMemo(() => new Set(assignedTables), [assignedTables]);
+
+  const assignedTableObjects = useMemo(() => {
+    return tables
+      .filter((t) => assignedTableSet.has(t.table_number))
+      .sort((a, b) => a.table_number - b.table_number);
+  }, [tables, assignedTableSet]);
+
+  const assignedOrders = useMemo(() => {
+    return orders.filter((o) => assignedTableSet.has(o.table_number));
+  }, [orders, assignedTableSet]);
+
   const newOrders = useMemo(() => {
-    return orders.filter((o) => o.status === 'new');
-  }, [orders]);
+    return assignedOrders.filter((o) => o.status === 'new');
+  }, [assignedOrders]);
 
   useEffect(() => {
     if (newOrders.length > 0) {
@@ -71,7 +86,7 @@ export const WaiterDashboard: React.FC = () => {
     }
   }, [newOrders.length]);
 
-  // If entering /waiter while a brand-new (< 2 min) unaccepted order exists and audio is unlocked, chime once
+  // If entering /waiter while a brand-new (< 2 min) unaccepted order exists on an assigned table and audio is unlocked, chime once
   const hasPlayedInitialFreshChimeRef = React.useRef(false);
   useEffect(() => {
     if (hasPlayedInitialFreshChimeRef.current || !soundEnabled || !audioUnlocked) return;
@@ -89,40 +104,30 @@ export const WaiterDashboard: React.FC = () => {
   const [selectedTableFilter, setSelectedTableFilter] = useState<number | 'all'>('all');
   const [inspectOrder, setInspectOrder] = useState<Order | null>(null);
 
-  const [activeWaiterId, setActiveWaiterId] = useState<string>(() => {
-    return localStorage.getItem('dineflow_active_waiter_id') || (waiters[0]?.id || 'waiter-1');
-  });
-  const [filterMyTablesOnly, setFilterMyTablesOnly] = useState<boolean>(false);
+  // If Admin removes a table that was selected in the filter, reset filter back to 'all' assigned tables
+  useEffect(() => {
+    if (selectedTableFilter !== 'all' && !assignedTableSet.has(selectedTableFilter)) {
+      setSelectedTableFilter('all');
+    }
+  }, [selectedTableFilter, assignedTableSet]);
 
-  const activeWaiter = useMemo(() => {
-    return waiters.find((w) => w.id === activeWaiterId) || waiters[0];
-  }, [waiters, activeWaiterId]);
-
-  const handleSelectWaiter = (id: string) => {
-    setActiveWaiterId(id);
-    localStorage.setItem('dineflow_active_waiter_id', id);
-  };
-
-  // Filter orders
+  // Filter orders strictly within assigned tables
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return assignedOrders.filter((o) => {
       const matchStatus = statusFilter === 'all' || o.status === statusFilter;
       const matchTable = selectedTableFilter === 'all' || o.table_number === selectedTableFilter;
-      const matchMyTables =
-        !filterMyTablesOnly ||
-        (activeWaiter?.assigned_tables && activeWaiter.assigned_tables.includes(o.table_number));
-      return matchStatus && matchTable && matchMyTables;
+      return matchStatus && matchTable;
     });
-  }, [orders, statusFilter, selectedTableFilter, filterMyTablesOnly, activeWaiter]);
+  }, [assignedOrders, statusFilter, selectedTableFilter]);
 
-  // Pending service calls
+  // Pending service calls strictly for assigned tables
   const pendingCalls = useMemo(() => {
-    return serviceCalls.filter((c) => c.status === 'pending');
-  }, [serviceCalls]);
+    return serviceCalls.filter((c) => c.status === 'pending' && assignedTableSet.has(c.table_number));
+  }, [serviceCalls, assignedTableSet]);
 
-  // Counts
+  // Counts strictly for assigned tables
   const newOrdersCount = newOrders.length;
-  const readyOrdersCount = orders.filter((o) => o.status === 'ready').length;
+  const readyOrdersCount = assignedOrders.filter((o) => o.status === 'ready').length;
 
   return (
     <div className="min-h-screen bg-[#FAF8F3] text-[#202622] flex flex-col">
@@ -204,6 +209,9 @@ export const WaiterDashboard: React.FC = () => {
               {soundEnabled ? <Volume2 className="w-4 h-4 text-[#F59E0B]" /> : <VolumeX className="w-4 h-4" />}
             </button>
 
+            {/* Circular Flag Language Switcher */}
+            <LanguageSwitcher theme="dark" />
+
             {/* Role login links & Logout */}
             <div className="flex items-center gap-1 bg-white/8 p-1 rounded-full border border-white/14 text-xs">
               <button
@@ -250,99 +258,99 @@ export const WaiterDashboard: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 space-y-5">
-        {/* Active Waiter Profile Bar */}
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E5E0D8] shadow-[0_8px_28px_-18px_rgba(23,63,53,0.14)] flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-[#173F35] text-[#F59E0B] flex flex-col items-center justify-center font-bold shrink-0">
-              <span className="text-[9px] uppercase tracking-wider opacity-75">ID</span>
-              <span className="text-xs font-mono font-extrabold">{activeWaiter?.badge_id || 'OF-01'}</span>
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-[#737A75] font-semibold">Smenadagi ofitsiant:</span>
-                <span className="font-display font-bold text-sm text-[#173F35]">
-                  {activeWaiter?.full_name || 'Karimov Dilshod Baxtiyorovich'}
-                </span>
-                <span className="text-[10px] font-bold text-[#1E5245]">
-                  · {activeWaiter?.role_title || 'Ofitsiant'}
+        {/* Active Waiter Profile Bar (Strictly shows logged-in waiter & read-only Admin-assigned tables) */}
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#E5E0D8] shadow-[0_8px_28px_-18px_rgba(23,63,53,0.14)] space-y-3.5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-[#173F35] text-[#F59E0B] flex flex-col items-center justify-center font-bold shrink-0">
+                <span className="text-[9px] uppercase tracking-wider opacity-75">ID</span>
+                <span className="text-xs font-mono font-extrabold">
+                  {activeWaiterAccount?.badge_id || 'OF-01'}
                 </span>
               </div>
-              <div className="flex items-center gap-3 text-xs text-[#737A75] font-mono mt-0.5 flex-wrap">
-                <span className="flex items-center gap-1">
-                  <Phone className="w-3 h-3 text-[#1E5245]" />
-                  <span>{activeWaiter?.phone || '+998 90 123 45 67'}</span>
-                </span>
-                {activeWaiter?.jshir && (
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-[#737A75] font-semibold">Smenadagi ofitsiant:</span>
+                  <span className="font-display font-bold text-sm text-[#173F35]">
+                    {activeWaiterAccount?.full_name || 'Ofitsiant'}
+                  </span>
+                  <span className="text-[10px] font-bold text-[#1E5245]">
+                    · Faqat biriktirilgan stollar
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-[#737A75] font-mono mt-0.5 flex-wrap">
                   <span className="flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-[#1E5245]" />
-                    <span>JSHIR: {activeWaiter.jshir}</span>
+                    <Phone className="w-3 h-3 text-[#1E5245]" />
+                    <span>{activeWaiterAccount?.phone_local || activeWaiterAccount?.phone_masked || '+998'}</span>
                   </span>
-                )}
-                {activeWaiter?.assigned_tables && activeWaiter.assigned_tables.length > 0 && (
-                  <span className="text-[#173F35] font-sans font-semibold">
-                    Stollar: {activeWaiter.assigned_tables.map((t) => `№${t}`).join(', ')}
+                  <span className="font-sans text-[11px] text-[#59635E] flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-amber-600" />
+                    <span>Biriktirilgan stollarni faqat Admin o&apos;zgartira oladi</span>
                   </span>
-                )}
+                </div>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => openStaffAccountModal(activeWaiterAccount, 'waiter')}
+                className="px-3.5 py-2 rounded-full bg-[#E8F0EC] hover:bg-[#DCE8E2] border border-[#F59E0B]/40 text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all"
+                title="Shaxsiy profilni tahrirlash"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Profilni tahrirlash</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {waiters.length > 1 && (
-              <select
-                value={activeWaiterId}
-                onChange={(e) => handleSelectWaiter(e.target.value)}
-                className="px-3.5 py-2 bg-[#FAF8F3] border border-[#E5E0D8] rounded-full text-xs font-bold text-[#173F35] focus:outline-none focus:border-[#173F35]"
-              >
-                {waiters.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.badge_id} — {w.full_name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {activeWaiter?.assigned_tables && activeWaiter.assigned_tables.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setFilterMyTablesOnly(!filterMyTablesOnly)}
-                className={`px-3.5 py-2 rounded-full text-xs font-bold transition-all border ${
-                  filterMyTablesOnly
-                    ? 'bg-[#173F35] text-white border-[#173F35]'
-                    : 'bg-[#FAF8F3] text-[#59635E] border-[#E5E0D8] hover:text-[#173F35]'
-                }`}
-              >
-                {filterMyTablesOnly ? '✓ Mening stollarim' : 'Mening stollarim'}
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => openStaffAccountModal(activeWaiterAccount, 'waiter')}
-              className="px-3.5 py-2 rounded-full bg-[#E8F0EC] hover:bg-[#DCE8E2] border border-[#F59E0B]/40 text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all"
-              title="Ofitsiant akkauntini tahrirlash"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              <span>Tahrirlash</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openStaffAccountModal(null, 'waiter')}
-              className="px-3.5 py-2 rounded-full bg-[#173F35] hover:bg-[#1E5245] text-xs font-bold text-white flex items-center gap-1.5 transition-all"
-              title="Yangi ofitsiant akkaunti yaratish"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-[#F59E0B]" />
-              <span>+ Akkaunt</span>
-            </button>
-
-            <Link
-              to="/admin/waiters"
-              className="px-3.5 py-2 rounded-full bg-[#FAF8F3] hover:bg-[#EFEAE0] border border-[#E5E0D8] text-xs font-bold text-[#173F35] flex items-center gap-1.5 transition-all"
-            >
-              <Users className="w-3.5 h-3.5 text-[#1E5245]" />
-              <span>Xodimlar</span>
-            </Link>
+          {/* Read-only Assigned Tables Bar */}
+          <div className="pt-3 border-t border-[#F3EFE6] flex items-center justify-between gap-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-[#173F35]">
+                Sizga biriktirilgan stollar ({assignedTables.length}):
+              </span>
+              {assignedTables.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTableFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                      selectedTableFilter === 'all'
+                        ? 'bg-[#173F35] text-white border-[#173F35]'
+                        : 'bg-[#FAF8F3] text-[#59635E] border-[#E5E0D8] hover:border-[#173F35]'
+                    }`}
+                  >
+                    Barchasi
+                  </button>
+                  {assignedTables.map((num) => {
+                    const active = selectedTableFilter === num;
+                    const hasNew = newOrders.some((o) => o.table_number === num);
+                    return (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setSelectedTableFilter(active ? 'all' : num)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border transition-colors flex items-center gap-1 ${
+                          active
+                            ? 'bg-[#173F35] text-[#F59E0B] border-[#173F35]'
+                            : hasNew
+                            ? 'bg-amber-50 text-[#173F35] border-[#F59E0B]'
+                            : 'bg-[#FAF8F3] text-[#173F35] border-[#E5E0D8] hover:border-[#173F35]'
+                        }`}
+                      >
+                        <span>Stol №{num}</span>
+                        {hasNew && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />}
+                      </button>
+                    );
+                  })}
+                </>
+              ) : (
+                <span className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                  Hali stol biriktirilmagan — Administrator biriktirishini kuting
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -402,7 +410,6 @@ export const WaiterDashboard: React.FC = () => {
                 onClick={() => {
                   setStatusFilter('new');
                   setSelectedTableFilter('all');
-                  setFilterMyTablesOnly(false);
                 }}
                 className="text-xs font-bold text-[#F59E0B] hover:text-amber-200 underline underline-offset-4"
               >
@@ -429,7 +436,9 @@ export const WaiterDashboard: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-white/95 font-medium mt-1.5 truncate">
-                      {ord.items.map((it) => `${it.quantity}x ${it.item_name}`).join(', ')}
+                      {ord.items
+                        .map((it) => `${it.quantity}x ${localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}`)
+                        .join(', ')}
                     </p>
                     <span className="text-xs font-mono font-bold text-[#F59E0B] mt-0.5 block tabular-nums">
                       {formatUZS(ord.total_amount)}
@@ -502,7 +511,7 @@ export const WaiterDashboard: React.FC = () => {
           <div className="space-y-2">
             {pendingCalls.map((call) => {
               const count = call.call_count || 1;
-              const isEscalated = count >= 2 || call.escalated_to_admin;
+              const isEscalated = count >= 3 || call.escalated_to_admin;
               return (
                 <div
                   key={call.id}
@@ -535,6 +544,8 @@ export const WaiterDashboard: React.FC = () => {
                         >
                           {isEscalated
                             ? `${count}-marta chaqiruv • Adminga xabar ketdi!`
+                            : count === 2
+                            ? '2-chaqiruv (Faqat Ofitsiantga)'
                             : '1-chaqiruv (Faqat Ofitsiantga)'}
                         </span>
                       </div>
@@ -600,22 +611,48 @@ export const WaiterDashboard: React.FC = () => {
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] shadow-xs">
-            <span className="text-xs text-[#737A75] font-medium block">Jami stollar</span>
+            <span className="text-xs text-[#737A75] font-medium block">Biriktirilgan stollar</span>
             <span className="font-display font-bold text-2xl text-[#173F35] mt-1 block">
-              {tables.length}
+              {assignedTables.length}
             </span>
           </div>
         </div>
+
+        {/* Empty State Banner when Admin has not assigned tables yet */}
+        {assignedTables.length === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F59E0B] text-[#173F35] flex items-center justify-center shrink-0">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-display font-bold text-sm text-[#173F35]">
+                Sizga hali stollar biriktirilmagan
+              </h3>
+              <p className="text-xs text-[#59635E] mt-1 leading-relaxed">
+                Ofitsiant ekranida faqat Administrator tomonidan sizga biriktirilgan stollardagi buyurtmalar va chaqiruvlar ko&apos;rinadi. Administrator panelidan sizning akkauntingizga stollar biriktirilishi bilan ular shu yerda avtomatik paydo bo&apos;ladi.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Filters Strip */}
         <div className="bg-white p-3 rounded-2xl border border-[#E5E0D8] shadow-xs flex flex-wrap items-center justify-between gap-3">
           {/* Status Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {[
-              { id: 'all', label: 'Barchasi' },
-              { id: 'new', label: 'Yangi' },
+              {
+                id: 'all',
+                label:
+                  assignedTables.length > 0
+                    ? `Barchasi (${assignedTables.length} stol)`
+                    : 'Barchasi',
+              },
+              { id: 'new', label: `Yangi${newOrdersCount > 0 ? ` (${newOrdersCount})` : ''}` },
               { id: 'preparing', label: 'Oshxonada' },
-              { id: 'ready', label: 'Tayyor (Olib chiqish)' },
+              {
+                id: 'ready',
+                label: `Tayyor (Olib chiqish)${readyOrdersCount > 0 ? ` (${readyOrdersCount})` : ''}`,
+              },
               { id: 'delivered', label: 'Yetkazilgan' },
             ].map((st) => (
               <button
@@ -632,47 +669,146 @@ export const WaiterDashboard: React.FC = () => {
             ))}
           </div>
 
-          {/* Table Selector Filter */}
+          {/* Assigned-Only Table Selector Filter */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[#737A75]">Stol:</span>
+            <span className="text-xs text-[#737A75]">Biriktirilgan stol:</span>
             <select
               value={selectedTableFilter}
+              disabled={assignedTables.length === 0}
               onChange={(e) =>
                 setSelectedTableFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
               }
-              className="text-xs font-semibold p-1.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] focus:outline-none focus:border-[#173F35]"
+              className="text-xs font-semibold p-1.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] focus:outline-none focus:border-[#173F35] disabled:opacity-60"
             >
-              <option value="all">Barcha 25 ta stol</option>
-              <optgroup label="Oddiy Stollar (1-14)">
-                {tables
-                  .filter((t) => t.tier === 'oddiy' || t.zone === 'oddiy' || t.zone === 'standard')
-                  .map((t) => (
-                    <option key={t.id} value={t.table_number}>
-                      {t.label || `Stol №${t.table_number}`} (Oddiy)
-                    </option>
-                  ))}
-              </optgroup>
-              <optgroup label="Biznes Stollar (15-20)">
-                {tables
-                  .filter((t) => t.tier === 'biznes' || t.zone === 'biznes' || t.zone === 'business')
-                  .map((t) => (
-                    <option key={t.id} value={t.table_number}>
-                      {t.label || `Stol №${t.table_number}`} (Biznes)
-                    </option>
-                  ))}
-              </optgroup>
-              <optgroup label="VIP Xonalar (21-25)">
-                {tables
-                  .filter((t) => t.tier === 'vip' || t.zone === 'vip')
-                  .map((t) => (
-                    <option key={t.id} value={t.table_number}>
-                      {t.label || `VIP №${t.table_number}`} (VIP)
-                    </option>
-                  ))}
-              </optgroup>
+              <option value="all">
+                {assignedTables.length > 0
+                  ? `Barcha biriktirilgan stollar (${assignedTables.length} ta)`
+                  : 'Stol biriktirilmagan'}
+              </option>
+              {assignedTableObjects.map((t) => (
+                <option key={t.id} value={t.table_number}>
+                  {t.label || `Stol №${t.table_number}`}
+                </option>
+              ))}
             </select>
           </div>
         </div>
+
+        {/* Assigned Tables Overview inside "Barchasi" View */}
+        {statusFilter === 'all' && assignedTableObjects.length > 0 && (
+          <section className="space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="font-display font-bold text-sm text-[#173F35]">
+                Sizga biriktirilgan stollar ({assignedTableObjects.length} ta)
+              </h2>
+              {selectedTableFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTableFilter('all')}
+                  className="text-xs font-bold text-[#1E5245] hover:underline"
+                >
+                  Barcha biriktirilgan stollarni ko&apos;rsatish
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {assignedTableObjects.map((tbl) => {
+                const tblOrders = assignedOrders.filter(
+                  (o) =>
+                    o.table_number === tbl.table_number &&
+                    o.status !== 'delivered' &&
+                    o.status !== 'cancelled'
+                );
+                const hasNew = tblOrders.some((o) => o.status === 'new');
+                const hasReady = tblOrders.some((o) => o.status === 'ready');
+                const hasPreparing = tblOrders.some((o) => o.status === 'preparing');
+                const hasCall = pendingCalls.some((c) => c.table_number === tbl.table_number);
+                const activeSum = tblOrders.reduce((acc, o) => acc + o.total_amount, 0);
+                const isSelected = selectedTableFilter === tbl.table_number;
+
+                const statusBadge = hasCall
+                  ? { label: 'Chaqiruv!', cls: 'bg-red-100 text-red-700' }
+                  : hasNew
+                  ? { label: 'Yangi (✓)', cls: 'bg-amber-100 text-amber-900' }
+                  : hasReady
+                  ? { label: 'Tayyor!', cls: 'bg-emerald-100 text-emerald-800' }
+                  : hasPreparing
+                  ? { label: 'Oshxonada', cls: 'bg-[#E8F0EC] text-[#173F35]' }
+                  : { label: "Bo'sh", cls: 'bg-[#FAF8F3] text-[#737A75]' };
+
+                const zoneText =
+                  tbl.tier === 'vip' || tbl.zone === 'vip'
+                    ? 'VIP'
+                    : tbl.tier === 'biznes' || tbl.zone === 'biznes' || tbl.zone === 'business'
+                    ? 'Biznes'
+                    : 'Oddiy';
+
+                return (
+                  <button
+                    key={tbl.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedTableFilter(isSelected ? 'all' : tbl.table_number)
+                    }
+                    className={`text-left p-3.5 rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                      isSelected
+                        ? 'bg-[#173F35] text-white border-[#173F35] shadow-md'
+                        : hasNew || hasCall
+                        ? 'bg-white border-[#F59E0B] ring-1 ring-[#F59E0B]/40 hover:shadow-sm'
+                        : 'bg-white border-[#E5E0D8] hover:border-[#173F35]/50 hover:shadow-xs'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span
+                          className={`font-display font-extrabold text-base block leading-tight ${
+                            isSelected ? 'text-[#F59E0B]' : 'text-[#173F35]'
+                          }`}
+                        >
+                          Stol №{tbl.table_number}
+                        </span>
+                        <span
+                          className={`text-[11px] font-medium block mt-0.5 ${
+                            isSelected ? 'text-emerald-100/80' : 'text-[#737A75]'
+                          }`}
+                        >
+                          {zoneText} · {tbl.seats} o&apos;rinli
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          isSelected ? 'bg-white/15 text-white' : statusBadge.cls
+                        }`}
+                      >
+                        {statusBadge.label}
+                      </span>
+                    </div>
+
+                    <div
+                      className={`pt-2 border-t text-[11px] flex items-center justify-between gap-1 ${
+                        isSelected ? 'border-white/15 text-emerald-100' : 'border-[#F2EFE9] text-[#59635E]'
+                      }`}
+                    >
+                      <span>
+                        {tblOrders.length > 0 ? `${tblOrders.length} faol buyurtma` : 'Faol buyurtma yo\'q'}
+                      </span>
+                      {activeSum > 0 && (
+                        <span
+                          className={`font-mono font-bold tabular-nums ${
+                            isSelected ? 'text-[#F59E0B]' : 'text-[#173F35]'
+                          }`}
+                        >
+                          {formatUZS(activeSum)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Orders Stream Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -733,7 +869,8 @@ export const WaiterDashboard: React.FC = () => {
                         <div key={item.id} className="text-xs flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <span className="text-[#202622] block">
-                              <strong className="text-[#173F35]">{item.quantity}x</strong> {item.item_name}
+                              <strong className="text-[#173F35]">{item.quantity}x</strong>{' '}
+                              {localizeOrderItem(item.item_name, item.menu_item_id, menuItems)}
                             </span>
                             {item.item_note && (
                               <span className="text-[11px] text-amber-800 block mt-0.5">
@@ -794,15 +931,22 @@ export const WaiterDashboard: React.FC = () => {
                         </button>
                       )}
 
-                      {(order.bill_requested || order.status === 'delivered') && (
-                        <button
-                          onClick={() => settleAndFreeTable(order.table_number)}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1"
-                          title="To'lov qabul qilinib stolni yangi mehmonlar uchun bo'shatish"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
-                          <span>Stolni bo'shatish</span>
-                        </button>
+                      {order.is_settled ? (
+                        <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Chek yopildi</span>
+                        </span>
+                      ) : (
+                        (order.bill_requested || order.status === 'delivered') && (
+                          <button
+                            onClick={() => settleAndFreeTable(order.table_number)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1"
+                            title="To'lov qabul qilinib chekni yopish va stolni bo'shatish"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
+                            <span>Chek yopildi / Bo&apos;shatish</span>
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -846,7 +990,7 @@ export const WaiterDashboard: React.FC = () => {
                   <div key={it.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
                     <div>
                       <span className="font-semibold text-[#202622]">
-                        {it.quantity}x {it.item_name}
+                        {it.quantity}x {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
                       </span>
                       {it.item_note && (
                         <p className="text-[11px] text-amber-700 italic">"{it.item_note}"</p>

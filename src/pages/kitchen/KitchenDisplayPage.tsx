@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { Order } from '../../types';
 import { formatShortTime } from '../../utils/formatters';
 import { useLiveClock } from '../../hooks/useLiveClock';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher';
 import { soundService } from '../../services/sound';
 import {
   Flame,
@@ -42,6 +44,7 @@ export const KitchenDisplayPage: React.FC = () => {
     openStaffAccountModal,
     logoutStaffAccount,
   } = useApp();
+  const { localizeOrderItem } = useLanguage();
   const navigate = useNavigate();
 
   const activeChefAccount =
@@ -283,6 +286,9 @@ export const KitchenDisplayPage: React.FC = () => {
             <Maximize2 className="w-4 h-4" />
           </button>
 
+          {/* Circular Flag Language Switcher */}
+          <LanguageSwitcher theme="dark" />
+
           {/* Chef Account Edit & Create */}
           <button
             type="button"
@@ -512,7 +518,7 @@ export const KitchenDisplayPage: React.FC = () => {
                             <div className="flex-1">
                               <span className="text-sm font-bold text-white block">
                                 <span className="text-amber-400 mr-1.5">{it.quantity}x</span>
-                                {it.item_name}
+                                {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
                               </span>
                               {it.item_note && (
                                 <p className="text-xs text-amber-300 mt-0.5 font-semibold">
@@ -704,7 +710,7 @@ export const KitchenDisplayPage: React.FC = () => {
                               <div className="flex items-center justify-between">
                                 <span className="text-sm font-bold text-white block">
                                   <span className="text-amber-400 mr-1.5">{it.quantity}x</span>
-                                  {it.item_name}
+                                  {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
                                 </span>
                                 {itemPrepTime && (
                                   <span className="text-[10px] font-mono text-gray-400">
@@ -828,7 +834,8 @@ export const KitchenDisplayPage: React.FC = () => {
                       {order.items.map((it) => (
                         <div key={it.id} className="text-xs text-gray-300">
                           <div>
-                            <strong className="text-white">{it.quantity}x</strong> {it.item_name}
+                            <strong className="text-white">{it.quantity}x</strong>{' '}
+                            {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
                           </div>
                           {it.item_note && (
                             <p className="text-[11px] text-amber-300 italic pl-4">

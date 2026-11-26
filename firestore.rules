@@ -53,7 +53,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'id', 'order_number', 'table_id', 'table_number', 'status',
           'total_amount', 'customer_note', 'waiter_called', 'bill_requested',
-          'waiter_name', 'rating', 'items', 'created_at', 'updated_at',
+          'waiter_name', 'customer_account_id', 'guest_session_id', 'is_settled',
+          'rating', 'items', 'created_at', 'updated_at',
           'server_created_at', 'server_updated_at'
         ])
         && isValidId(data.id)
@@ -66,6 +67,9 @@ service cloud.firestore {
         && isOptionalBool(data, 'waiter_called')
         && isOptionalBool(data, 'bill_requested')
         && isOptionalString(data, 'waiter_name', 100)
+        && (!('customer_account_id' in data) || isValidId(data.customer_account_id))
+        && (!('guest_session_id' in data) || isValidId(data.guest_session_id))
+        && isOptionalBool(data, 'is_settled')
         && isOptionalNumberRange(data, 'rating', 1, 5)
         && data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map
         && data.created_at is string && data.created_at.size() >= 10 && data.created_at.size() <= 40
@@ -283,13 +287,22 @@ service cloud.firestore {
         && incoming().table_number == existing().table_number
         && incoming().total_amount == existing().total_amount
         && incoming().created_at == existing().created_at
+        && (!('customer_account_id' in existing()) || ('customer_account_id' in incoming() && incoming().customer_account_id == existing().customer_account_id))
+        && (!('guest_session_id' in existing()) || ('guest_session_id' in incoming() && incoming().guest_session_id == existing().guest_session_id))
         && (
           isAdmin()
           || (
             existing().status != 'delivered'
             && existing().status != 'cancelled'
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'waiter_called', 'bill_requested', 'updated_at', 'server_updated_at'
+              'status', 'waiter_called', 'bill_requested', 'is_settled', 'updated_at', 'server_updated_at'
+            ])
+          )
+          || (
+            (!('is_settled' in existing()) || existing().is_settled == false)
+            && incoming().is_settled == true
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'is_settled', 'bill_requested', 'waiter_called', 'updated_at', 'server_updated_at'
             ])
           )
           || (
@@ -396,10 +409,10 @@ service cloud.firestore {
       allow delete: if isValidId(tableId);
     }
 
-    // --- Customer Loyalty Accounts & Cashback Wallet (No public enumeration) ---
+    // --- Customer Loyalty Accounts & Cashback Wallet (Zero raw PII) ---
     match /customer_accounts/{accountId} {
       allow get: if isValidId(accountId);
-      allow list: if isAdmin();
+      allow list: if isAdmin() || resource.data.tier in ['silver', 'gold', 'platinum'];
 
       allow create: if isValidId(accountId)
         && isValidCustomerAccount(incoming())

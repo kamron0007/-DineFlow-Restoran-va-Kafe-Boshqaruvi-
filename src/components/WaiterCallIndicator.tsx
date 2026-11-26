@@ -80,7 +80,8 @@ export const WaiterCallIndicator: React.FC = () => {
   // State 1: Active pending waiter call
   if (activeCall) {
     const count = activeCall.call_count || 1;
-    const isEscalated = Boolean(activeCall.escalated_to_admin || count >= 2);
+    const isEscalated = Boolean(activeCall.escalated_to_admin || count >= 3);
+    const isSecondCall = !isEscalated && count === 2;
     const isBill = activeCall.type === 'bill';
 
     return (
@@ -139,7 +140,9 @@ export const WaiterCallIndicator: React.FC = () => {
                     <Radio className="w-3 h-3 animate-pulse" />
                     <span>
                       {isEscalated
-                        ? `Qayta chaqiruv (${count}x)`
+                        ? `Admin xabardor (${count}x)`
+                        : isSecondCall
+                        ? 'Qayta chaqiruv (2x)'
                         : isBill
                         ? "Hisob so'rovi faol"
                         : 'Chaqiruv faol'}
@@ -155,6 +158,8 @@ export const WaiterCallIndicator: React.FC = () => {
                 <h3 className="font-display font-bold text-sm mt-1 leading-snug">
                   {isEscalated
                     ? `Ofitsiant kelmagani uchun Adminga ham xabar yuborildi`
+                    : isSecondCall
+                    ? `Ofitsiant ekraniga 2-marta xabar yuborildi (3-chaqiruvda Adminga boradi)`
                     : isBill
                     ? `Hisob varaqasi so'rovi ofitsiant ekraniga yuborildi`
                     : `Ofitsiant ekraniga real vaqtda xabar yuborildi`}

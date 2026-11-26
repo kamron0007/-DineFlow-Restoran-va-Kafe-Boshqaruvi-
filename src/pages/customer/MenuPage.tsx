@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { CustomerHeader } from '../../components/CustomerHeader';
 import { CustomerBottomNav } from '../../components/CustomerBottomNav';
 import { DishCard } from '../../components/DishCard';
@@ -8,7 +9,7 @@ import { RestaurantReviewsModal } from '../../components/RestaurantReviewsModal'
 import { OrderTickBadge } from '../../components/OrderTickBadge';
 import { CASHBACK_PERCENT_LABEL, TIER_CONFIG } from '../../services/customerAccount';
 import { MenuItem } from '../../types';
-import { formatUZS, formatPrice, ORDER_STATUS_MAP } from '../../utils/formatters';
+import { formatUZS, formatPrice, formatTimeAgo, ORDER_STATUS_MAP } from '../../utils/formatters';
 import {
   Search,
   X,
@@ -20,9 +21,13 @@ import {
   CheckCircle2,
   Star,
   ChevronRight,
+  ChevronDown,
   Wallet,
   UserPlus,
   LogIn,
+  Receipt,
+  Clock,
+  XCircle,
 } from 'lucide-react';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 
@@ -32,7 +37,7 @@ export const MenuPage: React.FC = () => {
     menuItems,
     tables,
     waiters,
-    orders,
+    customerOrders,
     serviceCalls,
     activeTableNumber,
     setActiveTableNumber,
@@ -46,6 +51,7 @@ export const MenuPage: React.FC = () => {
     customerSessionMode,
     openCustomerAuth,
   } = useApp();
+  const { hasSelectedLanguage, localizeCategory, localizeDish, localizeOrderItem } = useLanguage();
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('cat-all');
   const [selectedTier, setSelectedTier] = useState<'all' | 'oddiy' | 'biznes' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -53,14 +59,15 @@ export const MenuPage: React.FC = () => {
   const [selectedDishTab, setSelectedDishTab] = useState<DishModalTab>('order');
   const [isRestaurantReviewsOpen, setIsRestaurantReviewsOpen] = useState<boolean>(false);
   const [isQuickOrdering, setIsQuickOrdering] = useState<boolean>(false);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState<boolean>(false);
   const [searchParams] = useSearchParams();
   const { tableNum } = useParams<{ tableNum?: string }>();
   const navigate = useNavigate();
   const promptedAuthRef = React.useRef<boolean>(false);
 
-  // On every fresh QR scan session without a logged-in personal cabinet, clearly show the 3 entry options
+  // On every fresh QR scan session without a logged-in personal cabinet, wait for initial language choice, then show the 3 entry options
   useEffect(() => {
-    if (customerAccount || promptedAuthRef.current) return;
+    if (!hasSelectedLanguage || customerAccount || promptedAuthRef.current) return;
     let alreadySeenInSession = false;
     try {
       alreadySeenInSession = sessionStorage.getItem('dineflow_qr_choice_seen_v1') === '1';
@@ -75,7 +82,7 @@ export const MenuPage: React.FC = () => {
       }, 260);
       return () => clearTimeout(timer);
     }
-  }, [customerAccount, customerSessionMode, openCustomerAuth]);
+  }, [hasSelectedLanguage, customerAccount, customerSessionMode, openCustomerAuth]);
 
   const handleOpenDish = (dish: MenuItem, initialTab: DishModalTab = 'order') => {
     setSelectedDishTab(initialTab);
@@ -111,16 +118,30 @@ export const MenuPage: React.FC = () => {
     );
   }, [serviceCalls, activeTableNumber]);
 
+  // Scoped customer orders (Account: permanent full history; Guest: current session until check settled)
+  const myOrders = customerOrders;
+
   const activeTableOrder = useMemo(() => {
     return (
-      orders.find(
-        (o) =>
-          o.table_number === activeTableNumber &&
-          o.status !== 'delivered' &&
-          o.status !== 'cancelled'
-      ) || null
+      myOrders.find((o) => o.status !== 'delivered' && o.status !== 'cancelled') || null
     );
-  }, [orders, activeTableNumber]);
+  }, [myOrders]);
+
+  const latestOrder = activeTableOrder || myOrders[0] || null;
+
+  const formatOrderDateTime = (isoDate: string): string => {
+    try {
+      const d = new Date(isoDate);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return `${dd}.${mm}.${yyyy} · ${hh}:${min}`;
+    } catch {
+      return '';
+    }
+  };
 
   const zoneLabel = useMemo(() => {
     if (!currentTable) return 'Asosiy zal';
@@ -130,19 +151,23 @@ export const MenuPage: React.FC = () => {
     return 'Asosiy zal';
   }, [currentTable]);
 
-  // Filter dishes
+  // Filter dishes across original + localized names & descriptions
   const filteredDishes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return menuItems.filter((dish) => {
       const matchesCategory =
         selectedCategoryId === 'cat-all' || dish.category_id === selectedCategoryId;
       const matchesTier = selectedTier === 'all' || dish.tier === selectedTier;
+      if (!q) return matchesCategory && matchesTier;
+      const loc = localizeDish(dish);
       const matchesSearch =
-        searchQuery.trim() === '' ||
-        dish.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        dish.description.toLowerCase().includes(searchQuery.toLowerCase());
+        dish.name.toLowerCase().includes(q) ||
+        dish.description.toLowerCase().includes(q) ||
+        loc.name.toLowerCase().includes(q) ||
+        loc.description.toLowerCase().includes(q);
       return matchesCategory && matchesTier && matchesSearch;
     });
-  }, [menuItems, selectedCategoryId, selectedTier, searchQuery]);
+  }, [menuItems, selectedCategoryId, selectedTier, searchQuery, localizeDish]);
 
   // 1-Click Instant Order directly from MenuPage
   const handleQuickOrder = async (e: React.MouseEvent) => {
@@ -263,7 +288,7 @@ export const MenuPage: React.FC = () => {
                 onClick={() => callWaiter()}
                 className={`min-h-[42px] px-4 py-2 rounded-full border text-xs sm:text-[13px] font-bold flex items-center gap-2 transition-all active:scale-95 ${
                   activeTableCall
-                    ? (activeTableCall.call_count || 1) >= 2
+                    ? (activeTableCall.call_count || 1) >= 3 || activeTableCall.escalated_to_admin
                       ? 'bg-red-600 hover:bg-red-700 text-white border-red-500'
                       : 'bg-amber-400 hover:bg-amber-300 text-[#173F35] border-amber-300'
                     : 'bg-white/10 hover:bg-white/18 text-white border-white/18'
@@ -272,7 +297,7 @@ export const MenuPage: React.FC = () => {
                 <Bell className={`w-4 h-4 ${activeTableCall ? 'animate-bounce' : 'text-[#F59E0B]'}`} />
                 <span>
                   {activeTableCall
-                    ? (activeTableCall.call_count || 1) >= 2
+                    ? (activeTableCall.call_count || 1) >= 3 || activeTableCall.escalated_to_admin
                       ? `Adminga xabar (${activeTableCall.call_count}x)`
                       : `Chaqiruv (${activeTableCall.call_count || 1}x)`
                     : 'Ofitsiant chaqirish'}
@@ -282,33 +307,173 @@ export const MenuPage: React.FC = () => {
           </div>
         </section>
 
-        {/* Live Active Order Banner */}
-        {activeTableOrder && (
-          <div
-            onClick={() => navigate(`/orders?orderId=${activeTableOrder.id}`)}
-            className="bg-white rounded-2xl px-4 sm:px-5 py-3.5 shadow-xs flex items-center justify-between gap-3 cursor-pointer hover:border-[#173F35]/40 transition-colors border border-[#E5E0D8]"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <OrderTickBadge status={activeTableOrder.status} compact />
-              <div className="text-xs sm:text-sm truncate text-[#202622]">
-                <span className="font-mono font-bold text-[#173F35]">{activeTableOrder.order_number}</span>
-                <span className="mx-1.5 text-[#D8D1C5]">·</span>
-                <span className="font-semibold">
-                  {activeTableOrder.status === 'new'
-                    ? 'Yuborildi (1 pitichka)'
-                    : ORDER_STATUS_MAP[activeTableOrder.status]?.label || 'Tayyorlanmoqda'}
+        {/* Instant 1-Tap Order History & Live Status Bar (Always visible when customer has any order) */}
+        {myOrders.length > 0 && latestOrder && (
+          <section className="bg-white rounded-2xl border border-[#E5E0D8] shadow-xs overflow-hidden">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setIsHistoryExpanded((prev) => !prev)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsHistoryExpanded((prev) => !prev);
+                }
+              }}
+              className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 cursor-pointer hover:bg-[#FAF8F3] transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#173F35] text-[#F59E0B] flex items-center justify-center shrink-0">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-display font-bold text-xs sm:text-sm text-[#173F35]">
+                      {customerAccount
+                        ? `Buyurtmalarim tarixi (${myOrders.length})`
+                        : `Joriy chek buyurtmalari (${myOrders.length})`}
+                    </span>
+                    {!customerAccount && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#FAF8F3] border border-[#E5E0D8] text-[#59635E]">
+                        Chek yopilgunicha
+                      </span>
+                    )}
+                    <OrderTickBadge status={latestOrder.status} compact />
+                    {latestOrder.status === 'delivered' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Olindi
+                      </span>
+                    )}
+                    {latestOrder.status === 'cancelled' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                        Bekor qilindi
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#59635E] truncate mt-0.5">
+                    <span className="font-mono font-semibold text-[#173F35]">
+                      {formatOrderDateTime(latestOrder.created_at)}
+                    </span>
+                    <span className="mx-1.5 text-[#D8D1C5]">·</span>
+                    <span>
+                      {latestOrder.items
+                        .map((it) => `${it.quantity}× ${localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}`)
+                        .join(', ')}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="hidden sm:inline text-xs font-bold text-[#173F35]">
+                  {isHistoryExpanded ? 'Yopish' : "Hammasini ko'rish"}
                 </span>
-                <span className="mx-1.5 text-[#D8D1C5] hidden sm:inline">·</span>
-                <span className="font-mono tabular-nums hidden sm:inline text-[#59635E]">
-                  {formatUZS(activeTableOrder.total_amount)}
-                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-[#173F35] transition-transform duration-200 ${
+                    isHistoryExpanded ? 'rotate-180' : ''
+                  }`}
+                />
               </div>
             </div>
-            <div className="flex items-center gap-1 text-xs sm:text-sm font-bold text-[#173F35] shrink-0">
-              <span>Kuzatish</span>
-              <ArrowRight className="w-4 h-4 text-[#1E5245]" />
-            </div>
-          </div>
+
+            {isHistoryExpanded && (
+              <div className="border-t border-[#F2EFE9] bg-[#FAF8F3]/70 p-3.5 sm:p-4 space-y-2.5">
+                {myOrders.map((ord) => {
+                  const isDelivered = ord.status === 'delivered';
+                  const isCancelled = ord.status === 'cancelled';
+                  return (
+                    <div
+                      key={ord.id}
+                      onClick={() => navigate(`/orders?orderId=${ord.id}`)}
+                      className={`bg-white rounded-2xl border p-3.5 cursor-pointer hover:border-[#173F35]/50 transition-all ${
+                        isCancelled
+                          ? 'border-red-200/80'
+                          : isDelivered
+                          ? 'border-emerald-200/90'
+                          : 'border-[#F59E0B]/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-[#F2EFE9]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-extrabold text-xs sm:text-sm text-[#173F35]">
+                            {ord.order_number}
+                          </span>
+                          <span className="text-[11px] font-semibold text-[#59635E]">
+                            · Stol №{ord.table_number}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-mono text-[#737A75]">
+                            <Clock className="w-3 h-3 text-[#1E5245]" />
+                            <span>{formatOrderDateTime(ord.created_at)}</span>
+                            <span className="font-sans">({formatTimeAgo(ord.created_at)})</span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {isDelivered ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Olindi (Yetkazildi)</span>
+                            </span>
+                          ) : isCancelled ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-red-100 text-red-700">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Bekor qilindi</span>
+                            </span>
+                          ) : (
+                            <span
+                              className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                                ORDER_STATUS_MAP[ord.status]?.badgeBg || 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {ord.status === 'new'
+                                ? 'Yuborildi (✓)'
+                                : ORDER_STATUS_MAP[ord.status]?.label || ord.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Every ordered dish with quantity & line price */}
+                      <div className="py-2 space-y-1">
+                        {ord.items.map((it) => (
+                          <div key={it.id} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-[#202622]">
+                              <strong className="text-[#173F35] font-mono">{it.quantity}×</strong>{' '}
+                              {localizeOrderItem(it.item_name, it.menu_item_id, menuItems)}
+                            </span>
+                            <span className="font-mono text-[#59635E] tabular-nums shrink-0">
+                              {formatUZS(it.line_total)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="pt-2 border-t border-[#F2EFE9] flex items-center justify-between gap-2 text-xs">
+                        <span className="font-mono font-extrabold text-[#173F35] tabular-nums">
+                          Jami: {formatUZS(ord.total_amount)}
+                        </span>
+                        <span className="inline-flex items-center gap-1 font-bold text-[#1E5245]">
+                          <span>Batafsil</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/orders')}
+                    className="text-xs font-bold text-[#173F35] hover:underline flex items-center gap-1"
+                  >
+                    <span>Buyurtmalar sahifasiga o&apos;tish</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         )}
 
         {/* Search & Filter Toolbar */}
@@ -337,6 +502,7 @@ export const MenuPage: React.FC = () => {
           {/* Category Horizontal Filter */}
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth">
             {categories.map((cat) => {
+              const locCat = localizeCategory(cat);
               const isSelected = selectedCategoryId === cat.id;
               return (
                 <button
@@ -349,7 +515,7 @@ export const MenuPage: React.FC = () => {
                       : 'bg-[#FAF8F3] text-[#59635E] hover:text-[#173F35] border border-[#E5E0D8] hover:border-[#173F35]/30'
                   }`}
                 >
-                  {cat.name}
+                  {locCat.name}
                 </button>
               );
             })}
@@ -396,7 +562,10 @@ export const MenuPage: React.FC = () => {
         {/* Menu Grid Header */}
         <div className="flex items-center justify-between pt-1">
           <h1 className="font-display font-bold text-xl sm:text-2xl text-[#202622]">
-            {categories.find((c) => c.id === selectedCategoryId)?.name || 'Barcha taomlar'}
+            {(() => {
+              const found = categories.find((c) => c.id === selectedCategoryId);
+              return found ? localizeCategory(found).name : 'Barcha taomlar';
+            })()}
             {selectedTier !== 'all' && (
               <span className="text-sm font-bold text-[#1E5245] ml-2">
                 ({selectedTier === 'vip' ? 'VIP' : selectedTier === 'biznes' ? 'Biznes' : 'Oddiy'})

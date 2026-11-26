@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   TrendingUp,
   Users,
+  UserCheck,
   ChefHat,
   Settings,
   Store,
@@ -19,9 +20,10 @@ import { useApp } from '../context/AppContext';
 import { BrandLogo } from './BrandLogo';
 
 export const AdminSidebar: React.FC = () => {
-  const { orders, restaurantBranch, logoutStaffAccount } = useApp();
+  const { orders, allCustomerAccounts, restaurantBranch, logoutStaffAccount } = useApp();
   const navigate = useNavigate();
   const newOrdersCount = orders.filter((o) => o.status === 'new').length;
+  const customersCount = allCustomerAccounts.length;
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
@@ -109,6 +111,27 @@ export const AdminSidebar: React.FC = () => {
           <NavLink to="/admin/kitchen-efficiency" className={navClass}>
             <ChefHat className="w-4 h-4 shrink-0" />
             <span>Oshxona Samaradorligi (D3)</span>
+          </NavLink>
+
+          <NavLink
+            to="/admin/customers"
+            className={({ isActive }) =>
+              `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
+                isActive
+                  ? 'bg-[#F59E0B] text-[#173F35] font-bold shadow-[0_8px_22px_-8px_rgba(245,158,11,0.55)]'
+                  : 'text-emerald-100/80 hover:bg-white/8 hover:text-white'
+              }`
+            }
+          >
+            <div className="flex items-center gap-3">
+              <UserCheck className="w-4 h-4 shrink-0" />
+              <span>Mijozlar &amp; Akkauntlar</span>
+            </div>
+            {customersCount > 0 && (
+              <span className="bg-white/15 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full font-mono tabular-nums">
+                {customersCount}
+              </span>
+            )}
           </NavLink>
 
           <NavLink to="/admin/waiters" className={navClass}>

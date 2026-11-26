@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { AdminSidebar } from '../../components/AdminSidebar';
 import { AdminHeader } from '../../components/AdminHeader';
 import { MenuItem, Category } from '../../types';
@@ -21,18 +22,24 @@ import {
 
 export const MenuManagementPage: React.FC = () => {
   const { categories, menuItems, refreshData, addToast } = useApp();
+  const { localizeDish, localizeCategory } = useLanguage();
   const [selectedCatId, setSelectedCatId] = useState<string>('all');
   const [selectedTier, setSelectedTier] = useState<'all' | 'oddiy' | 'biznes' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Dish modal
   const [dishModalOpen, setDishModalOpen] = useState(false);
   const [editingDish, setEditingDish] = useState<MenuItem | null>(null);
 
-  // Form fields
+  // Form fields (UZ + optional EN / RU)
   const [dishName, setDishName] = useState('');
+  const [dishNameEn, setDishNameEn] = useState('');
+  const [dishNameRu, setDishNameRu] = useState('');
   const [dishCategoryId, setDishCategoryId] = useState('');
   const [dishDescription, setDishDescription] = useState('');
+  const [dishDescriptionEn, setDishDescriptionEn] = useState('');
+  const [dishDescriptionRu, setDishDescriptionRu] = useState('');
   const [dishPrice, setDishPrice] = useState<number>(35000);
   const [dishImageUrl, setDishImageUrl] = useState('');
   const [dishPrepTime, setDishPrepTime] = useState<number>(15);
@@ -43,6 +50,8 @@ export const MenuManagementPage: React.FC = () => {
   // Category modal
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [catName, setCatName] = useState('');
+  const [catNameEn, setCatNameEn] = useState('');
+  const [catNameRu, setCatNameRu] = useState('');
 
   // Preset images
   const PRESET_IMAGES = [
@@ -53,22 +62,30 @@ export const MenuManagementPage: React.FC = () => {
   ];
 
   const filteredDishes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return menuItems.filter((d) => {
       const matchCat = selectedCatId === 'all' || d.category_id === selectedCatId;
       const matchTier = selectedTier === 'all' || d.tier === selectedTier;
+      if (!q) return matchCat && matchTier;
+      const loc = localizeDish(d);
       const matchSearch =
-        searchQuery.trim() === '' ||
-        d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        d.description.toLowerCase().includes(searchQuery.toLowerCase());
+        d.name.toLowerCase().includes(q) ||
+        d.description.toLowerCase().includes(q) ||
+        loc.name.toLowerCase().includes(q) ||
+        loc.description.toLowerCase().includes(q);
       return matchCat && matchTier && matchSearch;
     });
-  }, [menuItems, selectedCatId, selectedTier, searchQuery]);
+  }, [menuItems, selectedCatId, selectedTier, searchQuery, localizeDish]);
 
   const openCreateDishModal = () => {
     setEditingDish(null);
     setDishName('');
+    setDishNameEn('');
+    setDishNameRu('');
     setDishCategoryId(categories[1]?.id || categories[0]?.id || 'cat-milliy');
     setDishDescription('');
+    setDishDescriptionEn('');
+    setDishDescriptionRu('');
     setDishPrice(40000);
     setDishImageUrl(PRESET_IMAGES[0].url);
     setDishPrepTime(15);
@@ -81,8 +98,12 @@ export const MenuManagementPage: React.FC = () => {
   const openEditDishModal = (dish: MenuItem) => {
     setEditingDish(dish);
     setDishName(dish.name);
+    setDishNameEn(dish.name_en || '');
+    setDishNameRu(dish.name_ru || '');
     setDishCategoryId(dish.category_id);
     setDishDescription(dish.description);
+    setDishDescriptionEn(dish.description_en || '');
+    setDishDescriptionRu(dish.description_ru || '');
     setDishPrice(dish.price);
     setDishImageUrl(dish.image_url || '');
     setDishPrepTime(dish.preparation_time_minutes);
@@ -98,8 +119,12 @@ export const MenuManagementPage: React.FC = () => {
       const item: MenuItem = {
         id: editingDish ? editingDish.id : 'dish-' + Date.now(),
         category_id: dishCategoryId,
-        name: dishName,
-        description: dishDescription,
+        name: dishName.trim(),
+        name_en: dishNameEn.trim() || undefined,
+        name_ru: dishNameRu.trim() || undefined,
+        description: dishDescription.trim(),
+        description_en: dishDescriptionEn.trim() || undefined,
+        description_ru: dishDescriptionRu.trim() || undefined,
         price: Number(dishPrice),
         image_url: dishImageUrl,
         is_available: dishAvailable,
@@ -119,13 +144,17 @@ export const MenuManagementPage: React.FC = () => {
   };
 
   const handleDeleteDish = async (id: string, name: string) => {
-    if (!window.confirm(`Haqiqatdan ham "${name}" taomini o'chirmoqchimisiz?`)) return;
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      return;
+    }
     try {
+      setConfirmDeleteId(null);
       await dataService.deleteMenuItem(id);
       await refreshData();
-      addToast('info', 'O\'chirildi', `"${name}" menyudan olib tashlandi.`);
+      addToast('info', "O'chirildi", `"${name}" menyudan olib tashlandi.`);
     } catch {
-      addToast('error', 'Xatolik', 'Taomni o\'chirishda xatolik yuz berdi');
+      addToast('error', 'Xatolik', "Taomni o'chirishda xatolik yuz berdi");
     }
   };
 
@@ -135,11 +164,11 @@ export const MenuManagementPage: React.FC = () => {
       await refreshData();
       addToast(
         'info',
-        'Holat o\'zgardi',
+        "Holat o'zgardi",
         `"${dish.name}" ${!dish.is_available ? 'mavjud' : 'tugagan'} deb belgilandi.`
       );
     } catch {
-      addToast('error', 'Xatolik', 'Holatni o\'zgartirib bo\'lmadi');
+      addToast('error', 'Xatolik', "Holatni o'zgartirib bo'lmadi");
     }
   };
 
@@ -150,14 +179,18 @@ export const MenuManagementPage: React.FC = () => {
       const newCat: Category = {
         id: 'cat-' + Date.now(),
         name: catName.trim(),
+        name_en: catNameEn.trim() || undefined,
+        name_ru: catNameRu.trim() || undefined,
         sort_order: categories.length + 1,
         created_at: new Date().toISOString(),
       };
       await dataService.saveCategory(newCat);
       await refreshData();
       setCatName('');
+      setCatNameEn('');
+      setCatNameRu('');
       setCatModalOpen(false);
-      addToast('success', 'Kategoriya qo\'shildi', `"${newCat.name}" yaratildi.`);
+      addToast('success', "Kategoriya qo'shildi", `"${newCat.name}" yaratildi.`);
     } catch {
       addToast('error', 'Xatolik', 'Kategoriya yaratishda xatolik');
     }
@@ -289,7 +322,9 @@ export const MenuManagementPage: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-[#FAF8F3]">
                   {filteredDishes.map((dish) => {
-                    const catName = categories.find((c) => c.id === dish.category_id)?.name || 'Kategoriya';
+                    const displayDish = localizeDish(dish);
+                    const matchedCat = categories.find((c) => c.id === dish.category_id);
+                    const catName = matchedCat ? localizeCategory(matchedCat).name : 'Kategoriya';
                     return (
                       <tr key={dish.id} className="hover:bg-[#FAF8F3]/50 transition-colors">
                         <td className="py-3 px-4">
@@ -297,7 +332,7 @@ export const MenuManagementPage: React.FC = () => {
                             <div className="w-12 h-12 rounded-xl overflow-hidden bg-[#FAF8F3] shrink-0 border border-[#E5E0D8]">
                               <img
                                 src={dish.image_url || `/images/dishes/${dish.id}.jpg`}
-                                alt={dish.name}
+                                alt={displayDish.name}
                                 onError={(e) => {
                                   const target = e.currentTarget;
                                   const fallback = `/images/dishes/${dish.id}.jpg`;
@@ -310,10 +345,10 @@ export const MenuManagementPage: React.FC = () => {
                             </div>
                             <div>
                               <span className="font-display font-bold text-sm text-[#202622] block">
-                                {dish.name}
+                                {displayDish.name}
                               </span>
                               <span className="text-[11px] text-[#737A75] line-clamp-1 max-w-xs">
-                                {dish.description}
+                                {displayDish.description}
                               </span>
                             </div>
                           </div>
@@ -371,11 +406,19 @@ export const MenuManagementPage: React.FC = () => {
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleDeleteDish(dish.id, dish.name)}
-                              className="p-2 rounded-lg text-[#737A75] hover:text-red-600 hover:bg-red-50 transition-colors"
+                              onClick={() => handleDeleteDish(dish.id, displayDish.name)}
+                              onBlur={() => {
+                                if (confirmDeleteId === dish.id) setConfirmDeleteId(null);
+                              }}
+                              className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${
+                                confirmDeleteId === dish.id
+                                  ? 'bg-red-600 text-white px-2.5 text-[11px] font-bold'
+                                  : 'text-[#737A75] hover:text-red-600 hover:bg-red-50'
+                              }`}
                               title="O'chirish"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
+                              {confirmDeleteId === dish.id && <span>Tasdiqlash</span>}
                             </button>
                           </div>
                         </td>
@@ -407,7 +450,7 @@ export const MenuManagementPage: React.FC = () => {
 
             <form onSubmit={handleSaveDish} className="my-4 space-y-4 text-xs">
               <div>
-                <label className="block font-semibold text-[#202622] mb-1">Taom nomi:</label>
+                <label className="block font-semibold text-[#202622] mb-1">Taom nomi (O&apos;zbek):</label>
                 <input
                   type="text"
                   required
@@ -416,6 +459,29 @@ export const MenuManagementPage: React.FC = () => {
                   placeholder="Masalan: To'y Oshi (Maxsus)"
                   className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-no-translate="true">
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">Name (English — optional):</label>
+                  <input
+                    type="text"
+                    value={dishNameEn}
+                    onChange={(e) => setDishNameEn(e.target.value)}
+                    placeholder="e.g. Wedding Plov"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">Название (Русский — необяз.):</label>
+                  <input
+                    type="text"
+                    value={dishNameRu}
+                    onChange={(e) => setDishNameRu(e.target.value)}
+                    placeholder="Напр.: Свадебный плов"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -481,15 +547,38 @@ export const MenuManagementPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-[#202622] mb-1">Tavsifi & Tarkibi:</label>
+                <label className="block font-semibold text-[#202622] mb-1">Tavsifi &amp; Tarkibi (O&apos;zbek):</label>
                 <textarea
                   required
-                  rows={3}
+                  rows={2}
                   value={dishDescription}
                   onChange={(e) => setDishDescription(e.target.value)}
                   placeholder="Masalan: Lahm mol go'shti, sariq sabzi, no'xat, mayiz..."
                   className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35] resize-none"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-no-translate="true">
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">Description (English):</label>
+                  <textarea
+                    rows={2}
+                    value={dishDescriptionEn}
+                    onChange={(e) => setDishDescriptionEn(e.target.value)}
+                    placeholder="Optional English description"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35] resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">Описание (Русский):</label>
+                  <textarea
+                    rows={2}
+                    value={dishDescriptionRu}
+                    onChange={(e) => setDishDescriptionRu(e.target.value)}
+                    placeholder="Необязательное описание на русском"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35] resize-none"
+                  />
+                </div>
               </div>
 
               {/* Preset Image Selection */}
@@ -606,7 +695,7 @@ export const MenuManagementPage: React.FC = () => {
             <form onSubmit={handleCreateCategory} className="my-4 space-y-3.5 text-xs">
               <div>
                 <label className="block font-semibold text-[#202622] mb-1">
-                  Kategoriya nomi:
+                  Kategoriya nomi (O&apos;zbek):
                 </label>
                 <input
                   type="text"
@@ -616,6 +705,33 @@ export const MenuManagementPage: React.FC = () => {
                   placeholder="Masalan: Tandir nonlar yoki Gazaklar"
                   className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
                 />
+              </div>
+
+              <div className="space-y-2.5" data-no-translate="true">
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">
+                    Category name (English — optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={catNameEn}
+                    onChange={(e) => setCatNameEn(e.target.value)}
+                    placeholder="e.g. Appetizers & Breads"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#59635E] mb-1">
+                    Название категории (Русский — необяз.):
+                  </label>
+                  <input
+                    type="text"
+                    value={catNameRu}
+                    onChange={(e) => setCatNameRu(e.target.value)}
+                    placeholder="Напр.: Закуски и лепёшки"
+                    className="w-full p-2.5 rounded-xl bg-[#FAF8F3] border border-[#E5E0D8] text-xs focus:outline-none focus:border-[#173F35]"
+                  />
+                </div>
               </div>
 
               <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-end gap-2">

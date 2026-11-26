@@ -113,7 +113,7 @@ export const CustomerAuthModal: React.FC = () => {
       aria-labelledby="customer-auth-title"
     >
       <div className="bg-white w-full sm:max-w-[448px] rounded-t-3xl sm:rounded-3xl border border-[#E5E0D8] shadow-[0_28px_72px_rgba(15,45,37,0.38)] overflow-hidden max-h-[92vh] overflow-y-auto">
-        {/* Clean Deep Oceanic Teal Header */}
+        {/* Clean Deep Forest Emerald Header */}
         <div className="bg-[#173F35] text-white px-6 py-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-2.5 min-w-0">
@@ -181,14 +181,14 @@ export const CustomerAuthModal: React.FC = () => {
                       Mehmon sifatida kirish
                     </p>
                     <p className="text-xs text-[#59635E] mt-0.5 leading-snug">
-                      Ro&apos;yxatdan o&apos;tmasdan darhol menyuni ko&apos;ring va buyurtma bering
+                      Ro&apos;yxatdan o&apos;tmasdan buyurtma bering (tarix faqat chek yopilgunicha saqlanadi)
                     </p>
                   </div>
                 </div>
                 <ArrowRight className="w-4 h-4 text-[#737A75] group-hover:text-[#173F35] group-hover:translate-x-0.5 transition-all shrink-0" />
               </button>
 
-              {/* Choice 2: Create New Account (2% Cashback) */}
+              {/* Choice 2: Create New Account (2% Cashback + Full Permanent History) */}
               <button
                 type="button"
                 onClick={() => {
@@ -206,7 +206,7 @@ export const CustomerAuthModal: React.FC = () => {
                       Akkaunt yaratish
                     </p>
                     <p className="text-xs text-emerald-100/85 mt-0.5 leading-snug">
-                      Yakunlangan buyurtmadan{' '}
+                      Barcha buyurtmalar doimiy saqlanadi ·{' '}
                       <strong className="text-[#F59E0B]">{CASHBACK_PERCENT_LABEL} keshbek</strong> +{' '}
                       <strong className="text-[#F59E0B] tabular-nums">{formatPrice(WELCOME_BONUS_UZS)}</strong> bonus
                     </p>

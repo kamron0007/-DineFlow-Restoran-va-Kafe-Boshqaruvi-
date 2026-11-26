@@ -146,7 +146,7 @@ class DataService {
       line_total: Math.max(0, Number(it.line_total) || 0),
     }));
 
-    return {
+    const payload: Record<string, unknown> = {
       id: safeId,
       order_number: String(order.order_number || generateOrderNumber()).slice(0, 32),
       table_id: safeTableId,
@@ -157,12 +157,22 @@ class DataService {
       waiter_called: Boolean(order.waiter_called),
       bill_requested: Boolean(order.bill_requested),
       waiter_name: String(order.waiter_name || "Mas'ul ofitsiant").slice(0, 100),
+      is_settled: Boolean(order.is_settled),
       items: safeItems,
       created_at: String(order.created_at || new Date().toISOString()).slice(0, 40),
       updated_at: String(order.updated_at || new Date().toISOString()).slice(0, 40),
       server_created_at: serverTimestamp(),
       server_updated_at: serverTimestamp(),
     };
+
+    if (order.customer_account_id) {
+      payload.customer_account_id = this.sanitizeFirestoreId(order.customer_account_id, 'acc');
+    }
+    if (order.guest_session_id) {
+      payload.guest_session_id = this.sanitizeFirestoreId(order.guest_session_id, 'guest');
+    }
+
+    return payload;
   }
 
   private buildFirestoreServiceCallPayload(call: ServiceCall): Record<string, unknown> {
@@ -212,6 +222,9 @@ class DataService {
       table_number: Number(data.table_number) || 1,
       status: (data.status || 'new') as OrderStatus,
       total_amount: Number(data.total_amount) || 0,
+      customer_account_id: typeof data.customer_account_id === 'string' && data.customer_account_id ? data.customer_account_id : undefined,
+      guest_session_id: typeof data.guest_session_id === 'string' && data.guest_session_id ? data.guest_session_id : undefined,
+      is_settled: Boolean(data.is_settled),
       customer_note: String(data.customer_note || ''),
       waiter_called: Boolean(data.waiter_called),
       bill_requested: Boolean(data.bill_requested),
@@ -281,11 +294,13 @@ class DataService {
             mergedMap.set(remote.id, {
               ...existingLocal,
               ...remote,
-              // Preserve local-only loyalty fields when present on the same device
+              // Preserve local-only loyalty fields and merge cloud ownership/settlement flags
               subtotal_amount: existingLocal?.subtotal_amount,
               cashback_used: existingLocal?.cashback_used,
               cashback_earned: existingLocal?.cashback_earned,
-              customer_account_id: existingLocal?.customer_account_id,
+              customer_account_id: remote.customer_account_id ?? existingLocal?.customer_account_id,
+              guest_session_id: remote.guest_session_id ?? existingLocal?.guest_session_id,
+              is_settled: Boolean(remote.is_settled || existingLocal?.is_settled),
               customer_name: existingLocal?.customer_name,
               customer_review: existingLocal?.customer_review,
             });
@@ -791,6 +806,7 @@ class DataService {
     cashbackUsed?: number;
     cashbackEarned?: number;
     customerAccountId?: string;
+    guestSessionId?: string;
     customerName?: string;
   }): Promise<Order> {
     const {
@@ -800,6 +816,7 @@ class DataService {
       cashbackUsed = 0,
       cashbackEarned = 0,
       customerAccountId,
+      guestSessionId,
       customerName,
     } = params;
 
@@ -852,6 +869,8 @@ class DataService {
       cashback_used: safeCashbackUsed,
       cashback_earned: safeCashbackEarned,
       customer_account_id: customerAccountId,
+      guest_session_id: customerAccountId ? undefined : guestSessionId,
+      is_settled: false,
       customer_name: customerName,
       total_amount: finalPayableTotal,
       customer_note: customerNote || '',
@@ -1073,17 +1092,16 @@ class DataService {
     const existingPending = currentCalls.find(
       (c) => c.table_number === tableNumber && c.status === 'pending'
     );
-    const otherPendingCalls = currentCalls.filter(
-      (c) => !(c.table_number === tableNumber && c.status === 'pending') && c.status === 'pending'
-    );
-
     const newCallCount = existingPending ? (existingPending.call_count || 1) + 1 : 1;
-    const isEscalated = newCallCount >= 2 || otherPendingCalls.length + 1 >= 3;
+    // Escalate to Admin strictly AFTER 2 calls (on the 3rd call and above)
+    const isEscalated = newCallCount >= 3;
 
     const defaultNote =
       type === 'waiter'
-        ? newCallCount >= 2
+        ? newCallCount >= 3
           ? `Mijoz ${newCallCount}-marta ofitsiantni chaqirmoqda (Ofitsiant kelmadi!)`
+          : newCallCount === 2
+          ? 'Mijoz 2-marta ofitsiantni chaqirmoqda'
           : 'Ofitsiant chaqirildi'
         : type === 'bill'
         ? "Hisob so'radi"
@@ -1220,24 +1238,35 @@ class DataService {
   public async settleAndFreeTable(tableNumber: number): Promise<void> {
     const currentOrders = await this.getOrders();
     const now = new Date().toISOString();
-    const toSettleIds: string[] = [];
+    const activeToDeliverIds: string[] = [];
+    const settledOnlyIds: string[] = [];
 
     currentOrders.forEach((o) => {
-      if (o.table_number === tableNumber && o.status !== 'delivered' && o.status !== 'cancelled') {
+      if (o.table_number === tableNumber && !o.is_settled) {
         this.markMutated(o.id);
-        o.status = 'delivered';
+        const wasActive = o.status !== 'delivered' && o.status !== 'cancelled';
+        if (wasActive) {
+          o.status = 'delivered';
+          activeToDeliverIds.push(o.id);
+        } else {
+          settledOnlyIds.push(o.id);
+        }
+        o.is_settled = true;
         o.bill_requested = false;
         o.waiter_called = false;
         o.updated_at = now;
-        toSettleIds.push(o.id);
       }
     });
 
-    if (toSettleIds.length > 0) {
+    const allChangedIds = [...activeToDeliverIds, ...settledOnlyIds];
+
+    if (allChangedIds.length > 0) {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
-      toSettleIds.forEach((id) => {
+
+      activeToDeliverIds.forEach((id) => {
         updateDoc(doc(db, 'orders', id), {
           status: 'delivered',
+          is_settled: true,
           bill_requested: false,
           waiter_called: false,
           updated_at: now,
@@ -1245,7 +1274,17 @@ class DataService {
         }).catch(() => {});
       });
 
-      if (isSupabaseConfigured() && supabase) {
+      settledOnlyIds.forEach((id) => {
+        updateDoc(doc(db, 'orders', id), {
+          is_settled: true,
+          bill_requested: false,
+          waiter_called: false,
+          updated_at: now,
+          server_updated_at: serverTimestamp(),
+        }).catch(() => {});
+      });
+
+      if (isSupabaseConfigured() && supabase && activeToDeliverIds.length > 0) {
         supabase
           .from('orders')
           .update({
@@ -1254,7 +1293,7 @@ class DataService {
             waiter_called: false,
             updated_at: now,
           })
-          .in('id', toSettleIds)
+          .in('id', activeToDeliverIds)
           .then(() => {});
       }
     }

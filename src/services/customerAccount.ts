@@ -5,6 +5,7 @@ import {
   updateDoc,
   collection,
   getDocs,
+  onSnapshot,
   query,
   where,
   limit,
@@ -22,6 +23,8 @@ const PHONE_LOCAL_MAP_KEY = 'dineflow_customer_phone_local_v1';
 const TRANSACTIONS_LOCAL_KEY = 'dineflow_customer_cashback_tx_v1';
 const ACTIVE_ACCOUNT_ID_KEY = 'dineflow_active_customer_account_id_v1';
 const SESSION_MODE_KEY = 'dineflow_customer_session_mode_v1';
+const GUEST_SESSION_ID_KEY = 'dineflow_guest_session_id_v1';
+const QR_CHOICE_SEEN_KEY = 'dineflow_qr_choice_seen_v1';
 
 export const WELCOME_BONUS_UZS = 5000;
 export const CASHBACK_RATE = 0.02;
@@ -219,16 +222,46 @@ class CustomerAccountService {
     return 'undecided';
   }
 
+  public getOrCreateGuestSessionId(): string {
+    if (typeof window === 'undefined') return 'guest_ssr';
+    try {
+      const existing = sessionStorage.getItem(GUEST_SESSION_ID_KEY);
+      if (existing && /^[a-zA-Z0-9_-]{8,80}$/.test(existing)) {
+        return existing;
+      }
+      const fresh = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      sessionStorage.setItem(GUEST_SESSION_ID_KEY, fresh);
+      return fresh;
+    } catch {
+      return `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+  }
+
+  public resetGuestSessionId(): string {
+    const fresh = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(GUEST_SESSION_ID_KEY, fresh);
+        sessionStorage.removeItem(QR_CHOICE_SEEN_KEY);
+      } catch {
+        // Ignore storage restrictions
+      }
+    }
+    return fresh;
+  }
+
   public setGuestSession(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(ACTIVE_ACCOUNT_ID_KEY);
     localStorage.setItem(SESSION_MODE_KEY, 'guest');
+    this.getOrCreateGuestSessionId();
   }
 
   public clearSession(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(ACTIVE_ACCOUNT_ID_KEY);
-    localStorage.setItem(SESSION_MODE_KEY, 'guest');
+    localStorage.setItem(SESSION_MODE_KEY, 'undecided');
+    this.resetGuestSessionId();
   }
 
   public getCachedActiveAccount(): CustomerAccount | null {
@@ -241,6 +274,93 @@ class CustomerAccountService {
 
   public getLocalPhoneForAccount(accountId: string): string {
     return readLocalPhoneMap()[accountId] || '+998 ';
+  }
+
+  public getCachedAllAccounts(): CustomerAccount[] {
+    return Object.values(readLocalAccounts()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }
+
+  public async checkPhoneAlreadyRegistered(phone: string, excludeAccountId?: string): Promise<boolean> {
+    if (!isValidUzbekPhone(phone)) return false;
+    const normPhone = normalizePhone(phone);
+    const accountId = await deriveAccountId(normPhone);
+    if (excludeAccountId && accountId === excludeAccountId) {
+      return false;
+    }
+    if (readLocalAccounts()[accountId]) {
+      return true;
+    }
+    try {
+      const snap = await getDoc(doc(db, 'customer_accounts', accountId));
+      if (snap.exists()) {
+        writeLocalAccount(snap.data() as CustomerAccount);
+        return true;
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `customer_accounts/${accountId}`);
+    }
+    return false;
+  }
+
+  public async listAllAccounts(): Promise<CustomerAccount[]> {
+    const localMap = readLocalAccounts();
+    try {
+      const q = query(
+        collection(db, 'customer_accounts'),
+        where('tier', 'in', ['silver', 'gold', 'platinum']),
+        limit(250)
+      );
+      const snap = await getDocs(q);
+      const merged = new Map<string, CustomerAccount>();
+      Object.values(localMap).forEach((acc) => merged.set(acc.id, acc));
+      snap.docs.forEach((d) => {
+        const remote = d.data() as CustomerAccount;
+        const prev = merged.get(remote.id);
+        if (!prev || new Date(remote.updated_at).getTime() >= new Date(prev.updated_at).getTime()) {
+          merged.set(remote.id, remote);
+          writeLocalAccount(remote);
+        }
+      });
+      return Array.from(merged.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'customer_accounts');
+      return this.getCachedAllAccounts();
+    }
+  }
+
+  public subscribeAllAccounts(callback: (accounts: CustomerAccount[]) => void): () => void {
+    const q = query(
+      collection(db, 'customer_accounts'),
+      where('tier', 'in', ['silver', 'gold', 'platinum']),
+      limit(250)
+    );
+    return onSnapshot(
+      q,
+      (snap) => {
+        const merged = new Map<string, CustomerAccount>();
+        Object.values(readLocalAccounts()).forEach((acc) => merged.set(acc.id, acc));
+        snap.docs.forEach((d) => {
+          const remote = d.data() as CustomerAccount;
+          const prev = merged.get(remote.id);
+          if (!prev || new Date(remote.updated_at).getTime() >= new Date(prev.updated_at).getTime()) {
+            merged.set(remote.id, remote);
+            writeLocalAccount(remote);
+          }
+        });
+        const sorted = Array.from(merged.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        callback(sorted);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'customer_accounts');
+        callback(this.getCachedAllAccounts());
+      }
+    );
   }
 
   public async loadActiveAccount(): Promise<{
